@@ -20,6 +20,13 @@ interface GraphNode extends d3.SimulationNodeDatum {
   r: number;
   dup?: boolean;
   ref: any;
+  // 3D layout (Network + Heading hierarchy only)
+  z?: number;
+  vz?: number;
+  _px?: number;
+  _py?: number;
+  _pz?: number;
+  _ps?: number;
 }
 
 interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
@@ -718,6 +725,10 @@ function initStudio(): void {
 
   // ------------------------------------------------------------------ Graph Render
   let sim: d3.Simulation<GraphNode, GraphLink> | null = null;
+  let stop3d: (() => void) | null = null;
+  let reset3d: (() => void) | null = null;
+  const CAM3D_DEFAULT = { yaw: -0.55, pitch: 0.32, zoom: 1 };
+  const cam3d = { ...CAM3D_DEFAULT };
 
   function nodeColor(n: { type: string; other?: boolean; ref?: any }): string {
     if (n.type === 'root') return css('--n-root');
@@ -739,8 +750,16 @@ function initStudio(): void {
       sim.stop();
       sim = null;
     }
+    if (stop3d) {
+      stop3d();
+      stop3d = null;
+    }
+    reset3d = null;
     const box = $('#graph');
     if (!box) return;
+    // 3D is used only for the Network layout in Heading hierarchy mode
+    const is3d = state.layout === 'network' && state.mode === 'structure';
+    box.classList.toggle('is-3d', is3d);
     d3.select(box).select('svg').remove();
     const W = box.clientWidth || 720;
     const H = box.clientHeight || 520;
@@ -767,11 +786,15 @@ function initStudio(): void {
     feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
     const g = svg.append('g');
-    state.zoom = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.15, 4])
-      .on('zoom', (e) => g.attr('transform', e.transform));
-    svg.call(state.zoom).on('dblclick.zoom', null);
+    if (is3d) {
+      state.zoom = null;
+    } else {
+      state.zoom = d3
+        .zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.15, 4])
+        .on('zoom', (e) => g.attr('transform', e.transform));
+      svg.call(state.zoom).on('dblclick.zoom', null);
+    }
     svg.on('click', (e) => {
       if (e.target === svg.node()) select(null);
     });
@@ -796,8 +819,9 @@ function initStudio(): void {
     }
     const hintEl = $('#hint');
     if (hintEl) {
-      hintEl.textContent =
-        state.layout === 'network'
+      hintEl.textContent = is3d
+        ? '3D · drag to orbit · scroll to zoom · click for details'
+        : state.layout === 'network'
           ? 'Scroll to zoom · drag nodes · click for details'
           : 'Click a branch node to collapse/expand';
     }
@@ -838,6 +862,11 @@ function initStudio(): void {
             .map((n) => n.id)
         )
     );
+
+    if (is3d) {
+      render3D(svg, g, W, H, nodes, links, labelSet, box, graphPanel);
+      return;
+    }
 
     const link = g
       .append('g')
@@ -971,6 +1000,381 @@ function initStudio(): void {
     draw();
     fit(svg, g, 0);
     sim.on('tick', draw);
+
+    state._graph = { node, link, links };
+    if (state.selected) {
+      const n = nodes.find((x) => x.id === state.selected);
+      if (n) highlight(n);
+      else state.selected = null;
+    }
+  }
+
+  // ------------------------------------------------------------------ 3D Network (Heading hierarchy only)
+  function render3D(
+    svg: d3.Selection<SVGSVGElement, unknown, null, undefined>,
+    g: d3.Selection<SVGGElement, unknown, null, undefined>,
+    W: number,
+    H: number,
+    nodes: GraphNode[],
+    rawLinks: GraphLink[],
+    labelSet: Set<string>,
+    box: HTMLElement,
+    graphPanel: HTMLElement
+  ): void {
+    // Sphere shading overlay for a lit, three-dimensional look
+    const shade = svg
+      .select('defs')
+      .append('radialGradient')
+      .attr('id', 'ps-sphere-shade')
+      .attr('cx', '35%')
+      .attr('cy', '30%')
+      .attr('r', '72%');
+    shade.append('stop').attr('offset', '0%').attr('stop-color', '#fff').attr('stop-opacity', 0.7);
+    shade.append('stop').attr('offset', '32%').attr('stop-color', '#fff').attr('stop-opacity', 0.12);
+    shade.append('stop').attr('offset', '72%').attr('stop-color', '#000').attr('stop-opacity', 0);
+    shade.append('stop').attr('offset', '100%').attr('stop-color', '#000').attr('stop-opacity', 0.5);
+
+    // Resolve links to node objects
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const links: GraphLink[] = [];
+    rawLinks.forEach((l) => {
+      const s = byId.get(typeof l.source === 'object' ? l.source.id : l.source);
+      const t = byId.get(typeof l.target === 'object' ? l.target.id : l.target);
+      if (s && t) links.push({ ...l, source: s, target: t });
+    });
+    const degree = new Map<string, number>();
+    links.forEach((l) => {
+      const s = l.source as GraphNode;
+      const t = l.target as GraphNode;
+      degree.set(s.id, (degree.get(s.id) || 0) + 1);
+      degree.set(t.id, (degree.get(t.id) || 0) + 1);
+    });
+
+    // Deterministic initial placement on a Fibonacci sphere
+    const N = nodes.length;
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    nodes.forEach((n, i) => {
+      if (n.type === 'root') {
+        n.x = n.y = n.z = 0;
+      } else {
+        const yy = 1 - (2 * (i + 0.5)) / N;
+        const rr = Math.sqrt(Math.max(0, 1 - yy * yy));
+        const th = golden * i;
+        const rad = 140;
+        n.x = Math.cos(th) * rr * rad;
+        n.y = yy * rad;
+        n.z = Math.sin(th) * rr * rad;
+      }
+      n.vx = n.vy = n.vz = 0;
+    });
+
+    // Lightweight 3D force simulation (links, many-body, collide, centre)
+    const charge = (n: GraphNode) =>
+      n.type === 'root' ? -900 : n.type === 'kw' ? -110 : -380;
+    const ITER = 300;
+    let alpha = 1;
+    const alphaDecay = 1 - Math.pow(0.001, 1 / ITER);
+    for (let it = 0; it < ITER; it++) {
+      alpha += (0 - alpha) * alphaDecay;
+      for (const l of links) {
+        const s = l.source as GraphNode;
+        const t = l.target as GraphNode;
+        let dx = t.x! - s.x!;
+        let dy = t.y! - s.y!;
+        let dz = t.z! - s.z!;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-6;
+        const strength = l.kind === 'cooc' ? 0.04 : 0.7;
+        const k = ((d - l.dist) / d) * alpha * strength;
+        dx *= k;
+        dy *= k;
+        dz *= k;
+        const ds = degree.get(s.id) || 1;
+        const dt = degree.get(t.id) || 1;
+        const b = ds / (ds + dt);
+        t.vx! -= dx * b;
+        t.vy! -= dy * b;
+        t.vz! -= dz * b;
+        s.vx! += dx * (1 - b);
+        s.vy! += dy * (1 - b);
+        s.vz! += dz * (1 - b);
+      }
+      for (let i = 0; i < N; i++) {
+        const a = nodes[i];
+        const ca = charge(a);
+        for (let j = i + 1; j < N; j++) {
+          const c = nodes[j];
+          const dx = c.x! - a.x!;
+          const dy = c.y! - a.y!;
+          const dz = c.z! - a.z!;
+          const l2 = Math.max(dx * dx + dy * dy + dz * dz, 1);
+          const wa = (charge(c) * alpha) / l2;
+          const wc = (ca * alpha) / l2;
+          a.vx! += dx * wa;
+          a.vy! += dy * wa;
+          a.vz! += dz * wa;
+          c.vx! -= dx * wc;
+          c.vy! -= dy * wc;
+          c.vz! -= dz * wc;
+          const minD = a.r + c.r + 5;
+          if (l2 < minD * minD) {
+            const d = Math.sqrt(l2);
+            const push = ((minD - d) / d) * 0.25;
+            a.vx! -= dx * push;
+            a.vy! -= dy * push;
+            a.vz! -= dz * push;
+            c.vx! += dx * push;
+            c.vy! += dy * push;
+            c.vz! += dz * push;
+          }
+        }
+      }
+      for (const n of nodes) {
+        if (n.type === 'root') {
+          n.x = n.y = n.z = 0;
+          n.vx = n.vy = n.vz = 0;
+          continue;
+        }
+        n.vx! -= n.x! * 0.04 * alpha;
+        n.vy! -= n.y! * 0.04 * alpha;
+        n.vz! -= n.z! * 0.04 * alpha;
+        n.x! += n.vx! *= 0.6;
+        n.y! += n.vy! *= 0.6;
+        n.z! += n.vz! *= 0.6;
+      }
+    }
+
+    // Camera / perspective
+    const R =
+      (d3.max(nodes, (n) => Math.sqrt(n.x! ** 2 + n.y! ** 2 + n.z! ** 2)) || 100) + 24;
+    const focal = R * 3;
+    const baseScale = (Math.min(W, H) / 2 - 46) / ((R * focal) / (focal - R));
+    const sizeK = Math.max(0.7, Math.min(1.35, baseScale));
+
+    // Orbit guide rings (equator + floor)
+    const ringPts = (radius: number, yPlane: number) =>
+      d3.range(0, 65).map((i) => {
+        const a = (i / 64) * Math.PI * 2;
+        return [Math.cos(a) * radius, yPlane, Math.sin(a) * radius] as [number, number, number];
+      });
+    const rings = [ringPts(R * 0.95, 0), ringPts(R * 0.7, R * 0.9)];
+    const ringSel = g
+      .append('g')
+      .attr('class', 'orbit-rings')
+      .selectAll<SVGPathElement, [number, number, number][]>('path')
+      .data(rings)
+      .join('path')
+      .attr('fill', 'none')
+      .attr('stroke', css('--accent'))
+      .attr('stroke-opacity', (_d, i) => (i === 0 ? 0.16 : 0.09))
+      .attr('stroke-dasharray', (_d, i) => (i === 0 ? null : '2 5'))
+      .attr('pointer-events', 'none');
+
+    const link = g
+      .append('g')
+      .selectAll<SVGLineElement, GraphLink>('line')
+      .data(links)
+      .join('line')
+      .attr('stroke', (l) =>
+        l.kind === 'cooc'
+          ? css('--n-cluster')
+          : l.kind === 'heading'
+            ? css('--link-strong')
+            : l.kind === 'tree'
+              ? css('--accent-blue')
+              : css('--link')
+      )
+      .attr('stroke-dasharray', (l) =>
+        l.kind === 'support' ? '3 3' : l.kind === 'cooc' ? '1 3' : null
+      );
+
+    const node = g
+      .append('g')
+      .selectAll<SVGGElement, GraphNode>('g')
+      .data(nodes)
+      .join('g')
+      .attr(
+        'class',
+        (n) => `node ${n.type === 'root' ? 'root' : n.type !== 'kw' ? 'hub' : ''}`
+      )
+      .style('cursor', 'pointer');
+
+    node
+      .filter((n) => n.type !== 'kw')
+      .append('circle')
+      .attr('class', 'node-halo')
+      .attr('fill', (n) => nodeColor(n))
+      .attr('fill-opacity', (n) => (n.type === 'root' ? 0.22 : 0.15));
+    node
+      .append('circle')
+      .attr('class', 'node-core')
+      .attr('fill', (n) => nodeColor(n))
+      .attr('filter', (n) => (n.type !== 'kw' ? 'url(#ps-node-glow)' : null));
+    node
+      .append('circle')
+      .attr('class', 'node-shade')
+      .attr('fill', 'url(#ps-sphere-shade)')
+      .attr('pointer-events', 'none');
+    node
+      .append('text')
+      .attr('text-anchor', 'middle')
+      .text((n) => trunc(n.label, n.type === 'section' ? 34 : 30))
+      .attr('display', (n) =>
+        !n.dup && (state.allLabels || labelSet.has(n.id)) ? null : 'none'
+      );
+
+    let dragging = false;
+    let hovering = false;
+    let lastInteract = 0;
+
+    node
+      .on('mouseenter', (e, n) => {
+        hovering = true;
+        tip(e, n);
+      })
+      .on('mousemove', (e) => moveTip(e))
+      .on('mouseleave', () => {
+        hovering = false;
+        lastInteract = Date.now();
+        hideTip();
+      })
+      .on('click', (e, n) => {
+        e.stopPropagation();
+        select(n);
+      });
+
+    const project = () => {
+      const cy = Math.cos(cam3d.yaw);
+      const sy = Math.sin(cam3d.yaw);
+      const cp = Math.cos(cam3d.pitch);
+      const sp = Math.sin(cam3d.pitch);
+      const proj = (x: number, y: number, z: number) => {
+        const x1 = x * cy - z * sy;
+        const z1 = x * sy + z * cy;
+        const y2 = y * cp - z1 * sp;
+        const z2 = y * sp + z1 * cp;
+        const persp = focal / (focal + z2);
+        const s = persp * baseScale * cam3d.zoom;
+        return { px: W / 2 + x1 * s, py: H / 2 + y2 * s, pz: z2, ps: persp * cam3d.zoom };
+      };
+      nodes.forEach((n) => {
+        const p = proj(n.x!, n.y!, n.z!);
+        n._px = p.px;
+        n._py = p.py;
+        n._pz = p.pz;
+        n._ps = p.ps;
+      });
+      return proj;
+    };
+
+    const fade = (z: number) => {
+      const t = Math.max(0, Math.min(1, (z + R) / (2 * R)));
+      return 1 - 0.62 * t;
+    };
+
+    const draw = () => {
+      const proj = project();
+      ringSel.attr('d', (pts) =>
+        pts
+          .map((p, i) => {
+            const q = proj(p[0], p[1], p[2]);
+            return `${i ? 'L' : 'M'}${q.px.toFixed(1)},${q.py.toFixed(1)}`;
+          })
+          .join('')
+      );
+      link
+        .attr('x1', (l) => (l.source as GraphNode)._px!)
+        .attr('y1', (l) => (l.source as GraphNode)._py!)
+        .attr('x2', (l) => (l.target as GraphNode)._px!)
+        .attr('y2', (l) => (l.target as GraphNode)._py!)
+        .attr('stroke-width', (l) => {
+          const s = ((l.source as GraphNode)._ps! + (l.target as GraphNode)._ps!) / 2;
+          const base =
+            l.kind === 'cooc'
+              ? Math.min(4, 0.6 + (l.w || 1) * 0.35)
+              : l.kind === 'heading'
+                ? 1.8
+                : l.kind === 'tree'
+                  ? 1.5
+                  : 1.1;
+          return base * s;
+        })
+        .attr('stroke-opacity', (l) => {
+          const z = ((l.source as GraphNode)._pz! + (l.target as GraphNode)._pz!) / 2;
+          return (l.kind === 'cooc' ? 0.55 : 0.9) * fade(z);
+        });
+
+      node
+        .attr('transform', (n) => `translate(${n._px!.toFixed(1)},${n._py!.toFixed(1)})`)
+        .attr('opacity', (n) => fade(n._pz!));
+      node
+        .select<SVGCircleElement>('circle.node-halo')
+        .attr('r', (n) => (n.r + (n.type === 'root' ? 8 : 5)) * n._ps! * sizeK);
+      node
+        .select<SVGCircleElement>('circle.node-core')
+        .attr('r', (n) => n.r * n._ps! * sizeK);
+      node
+        .select<SVGCircleElement>('circle.node-shade')
+        .attr('r', (n) => n.r * n._ps! * sizeK);
+      node
+        .select<SVGTextElement>('text')
+        .attr('dy', (n) => n.r * n._ps! * sizeK + 12)
+        .style('font-size', (n) => {
+          const base = n.type === 'root' ? 13.5 : n.type !== 'kw' ? 12 : 11;
+          return `${(base * Math.max(0.75, Math.min(1.45, n._ps!))).toFixed(1)}px`;
+        });
+      // Painter's algorithm: far nodes first
+      node.sort((a, b) => b._pz! - a._pz!);
+    };
+
+    // Orbit (drag background) and zoom (wheel)
+    svg.call(
+      d3
+        .drag<SVGSVGElement, unknown>()
+        .filter((e) => !e.ctrlKey && !e.button && !(e.target as Element).closest('.node'))
+        .on('start', () => {
+          dragging = true;
+          svg.style('cursor', 'grabbing');
+        })
+        .on('drag', (e) => {
+          cam3d.yaw += e.dx * 0.008;
+          cam3d.pitch = Math.max(-1.45, Math.min(1.45, cam3d.pitch + e.dy * 0.008));
+          draw();
+        })
+        .on('end', () => {
+          dragging = false;
+          lastInteract = Date.now();
+          svg.style('cursor', null);
+        })
+    );
+    svg.on(
+      'wheel.orbit',
+      (e: WheelEvent) => {
+        e.preventDefault();
+        cam3d.zoom = Math.max(0.3, Math.min(4, cam3d.zoom * Math.exp(-e.deltaY * 0.0015)));
+        lastInteract = Date.now();
+        draw();
+      },
+      { passive: false } as any
+    );
+
+    draw();
+
+    // Gentle auto-rotation, paused while the user is interacting
+    const timer = d3.timer(() => {
+      if (!box.isConnected || !graphPanel.classList.contains('on')) return;
+      if (dragging || hovering || Date.now() - lastInteract < 2500) return;
+      cam3d.yaw += 0.0022;
+      draw();
+    });
+
+    stop3d = () => timer.stop();
+    reset3d = () => {
+      cam3d.yaw = CAM3D_DEFAULT.yaw;
+      cam3d.pitch = CAM3D_DEFAULT.pitch;
+      cam3d.zoom = CAM3D_DEFAULT.zoom;
+      lastInteract = Date.now();
+      draw();
+    };
 
     state._graph = { node, link, links };
     if (state.selected) {
@@ -1149,9 +1553,13 @@ function initStudio(): void {
   }
 
   $('#fit')?.addEventListener('click', () => {
+    if (reset3d) {
+      reset3d();
+      return;
+    }
     const svg = d3.select<SVGSVGElement, unknown>('#page-structure-studio #graph svg');
     if (!svg.empty()) {
-      fit(svg, svg.select<SVGGElement>('g'));
+      fit(svg as any, svg.select<SVGGElement>('g') as any);
     }
   });
 

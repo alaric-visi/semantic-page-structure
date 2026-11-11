@@ -1277,6 +1277,20 @@ body {
   cursor: grabbing;
 }
 
+/* 3D Network view (Heading hierarchy only) */
+#page-structure-studio #graph.is-3d {
+  background-image:
+    radial-gradient(ellipse at 50% 52%, rgba(0, 229, 255, 0.14) 0%, rgba(59, 130, 246, 0.06) 35%, transparent 65%),
+    radial-gradient(circle at 80% 85%, rgba(255, 42, 133, 0.1) 0%, transparent 45%),
+    radial-gradient(rgba(56, 189, 248, 0.12) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 22px 22px;
+}
+
+#page-structure-studio #graph.is-3d .node circle.node-core {
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 0.8px;
+}
+
 #page-structure-studio .legend {
   position: absolute;
   left: 12px;
