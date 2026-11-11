@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Semantic Page Structure: Topical Authority, Heading Hierarchy &amp; Keyword Relevance — Mike Higgins</title>
+  <meta name="description" content="Scrape any web page or pasted HTML to rebuild its heading hierarchy, score 1–4 word key phrases for on-page SEO relevance (0–100) and map topic clusters and section alignment in an interactive knowledge graph." />
+  <meta name="keywords" content="semantic page structure, topical authority, heading hierarchy, on-page SEO analyser, keyword relevance, topic clusters, knowledge graph, content alignment" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Semantic Page Structure — Topical Authority &amp; Heading Hierarchy Studio" />
+  <meta property="og:description" content="Scrape any web page to rebuild its heading hierarchy, score key phrases for on-page SEO relevance (0–100) and map topic clusters in an interactive knowledge graph." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Semantic Page Structure — Topical Authority &amp; Heading Hierarchy Studio" />
+  <meta name="twitter:description" content="Scrape any web page to rebuild its heading hierarchy, score key phrases for on-page SEO relevance (0–100) and map topic clusters in an interactive knowledge graph." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Semantic Page Structure",
+        "applicationCategory": "BusinessApplication",
+        "applicationSubCategory": "Semantic SEO & On-Page Structure Analyser",
+        "operatingSystem": "Any (web browser)",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "GBP" },
+        "description": "Scrape any web page or pasted HTML to rebuild its heading hierarchy, score 1–4 word key phrases for on-page SEO relevance (0–100) and map topic clusters and section alignment in an interactive knowledge graph.",
+        "author": {
+          "@type": "Person",
+          "name": "Mike Higgins",
+          "url": "https://mikehiggins.me.uk"
+        },
+        "inLanguage": "en-GB"
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <div class="app-container" id="page-structure-studio" data-view="split">
+    <!-- Top Studio Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <a href="https://mikehiggins.me.uk/tools" class="back-link" title="Back to Tools" id="back-link">
+          <span aria-hidden="true">&larr;</span>
+          <span class="back-link-text">Back to Tools</span>
+        </a>
+        <div class="title-group">
+          <h1 class="app-title">
+            <svg class="icon text-emerald" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <circle cx="4" cy="6" r="2"/>
+              <circle cx="20" cy="6" r="2"/>
+              <circle cx="5" cy="19" r="2"/>
+              <circle cx="19" cy="19" r="2"/>
+              <path d="M6 7l4 3.5M18 7l-4 3.5M6.5 17.5l3.5-3M17.5 17.5l-3.5-3"/>
+            </svg>
+            Semantic Page Structure
+          </h1>
+          <span class="app-subtitle" id="header-meta">Topical Authority, Heading Hierarchy &amp; Keyword Relevance Studio</span>
+        </div>
+
+        <div class="header-divider" aria-hidden="true"></div>
+
+        <!-- Quick Metrics -->
+        <div class="header-metrics" id="header-metrics">
+          <span class="header-pill" id="metric-topic">Topic: &ndash;</span>
+          <span aria-hidden="true">&middot;</span>
+          <span class="header-pill" id="metric-keywords">0 keywords</span>
+          <span aria-hidden="true">&middot;</span>
+          <span class="header-pill" id="metric-sections">0 sections</span>
+        </div>
+      </div>
+
+      <!-- View Switcher -->
+      <div class="header-center">
+        <div role="group" aria-label="View mode" class="segmented-control">
+          <button type="button" class="segment-btn active" data-view="split" id="view-split-btn" aria-pressed="true">Split View</button>
+          <button type="button" class="segment-btn" data-view="input" id="view-input-btn" aria-pressed="false">Input &amp; Summary</button>
+          <button type="button" class="segment-btn" data-view="output" id="view-output-btn" aria-pressed="false">Results</button>
+        </div>
+      </div>
+
+      <!-- Header Right -->
+      <div class="header-right">
+        <button type="button" class="btn btn-sm" id="btn-about" aria-label="About Semantic Page Structure" aria-haspopup="dialog" title="About Semantic Page Structure">
+          <svg class="icon-sm text-emerald" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span class="btn-text-wide">About</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Studio Workspace (Split View) -->
+    <main class="workspace" id="workspace">
+      <!-- LEFT PANEL: URL / HTML INPUT & PAGE SUMMARY -->
+      <section class="panel panel-input" id="panel-input" aria-labelledby="panel-input-title">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <h2 class="panel-title" id="panel-input-title">Target Page &amp; Overview</h2>
+            <span class="panel-meta" id="input-mode-badge">URL Fetch</span>
+          </div>
+          <div class="panel-actions">
+            <button type="button" class="btn btn-xs" id="toggleHtml" title="Paste rendered HTML if the target site blocks scrapers or uses client-side JS">
+              Paste HTML instead
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <!-- Search / Analyse Form -->
+          <form class="search-form" id="f">
+            <div class="form-group">
+              <label for="url" class="form-label">Page URL to Analyse</label>
+              <input
+                id="url"
+                type="text"
+                class="text-input mono"
+                placeholder="https://example.com/page-to-analyse"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+
+            <div class="html-box" id="htmlBox">
+              <label for="html" class="form-label">Rendered HTML Source <span class="muted">(optional override)</span></label>
+              <p class="form-hint">
+                For pages that block scrapers or render with JavaScript: open the page, copy its rendered HTML (DevTools &rarr; Elements &rarr; right-click <code>&lt;html&gt;</code> &rarr; Copy outerHTML) and paste it here. Keep the URL above filled in so the slug is scored too.
+              </p>
+              <textarea id="html" class="textarea-input mono" placeholder="<html>…</html>"></textarea>
+            </div>
+
+            <button type="submit" class="btn-primary-action" id="go">
+              <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6 7l4 3.5M18 7l-4 3.5M6.5 17.5l3.5-3M17.5 17.5l-3.5-3"/>
+              </svg>
+              <span>Analyse Page Structure</span>
+            </button>
+          </form>
+
+          <!-- Loading indicator -->
+          <div class="loading-row" id="loading">
+            <span class="spin" aria-hidden="true"></span>
+            <span>Fetching &amp; analysing page structure&hellip;</span>
+          </div>
+
+          <!-- Error Banner -->
+          <div class="banner" id="err" role="alert"></div>
+
+          <!-- Quick Demo / Sample Triggers -->
+          <div class="samples-box">
+            <span class="form-label">Quick Samples</span>
+            <div class="chips-demo">
+              <button type="button" class="btn btn-xs demo" data-url="https://en.wikipedia.org/wiki/Search_engine_optimization">
+                Wikipedia: SEO
+              </button>
+              <button type="button" class="btn btn-xs demo" data-url="https://en.wikipedia.org/wiki/Coffee">
+                Wikipedia: Coffee
+              </button>
+              <button type="button" class="btn btn-xs demo" data-url="https://ahrefs.com/blog/keyword-research/">
+                Ahrefs: Keyword Research
+              </button>
+              <button type="button" class="btn btn-xs" id="demoSampleHtml">
+                Sample HTML (Instant)
+              </button>
+            </div>
+          </div>
+
+          <!-- Summary Metrics Grid (populated after analysis) -->
+          <div id="summaryWrap" hidden>
+            <div class="section-divider-label">Page Signal Summary</div>
+            <div class="summary" id="summary"></div>
+          </div>
+
+          <!-- How Scoring Works Quick Reference Card -->
+          <div class="info-card">
+            <div class="info-card-title">On-Page Relevance Model (0&ndash;100)</div>
+            <p class="info-card-text">
+              Extracts 1&ndash;4 word n-grams, merges singular/plural stems and scores each phrase across placement zones (<strong>Title</strong> 10, <strong>H1</strong> 8, <strong>URL</strong> 6, <strong>H2</strong> 5, <strong>Meta</strong> 5, <strong>H3</strong> 3, <strong>H4&ndash;H6</strong> 2, <strong>Alt/Bold</strong> 1.5, <strong>Anchor</strong> 1), body frequency (<code>count<sup>0.7</sup></code>), opening-copy presence and section spread.
+            </p>
+          </div>
+        </div>
+
+        <footer class="panel-footer">
+          <span class="status-badge">
+            <span class="status-badge-dot" aria-hidden="true"></span>
+            <span id="status-text">Ready</span>
+          </span>
+          <span class="footer-privacy">On-page semantic &amp; structural analysis</span>
+        </footer>
+      </section>
+
+      <!-- DRAGGABLE SPLIT RESIZER -->
+      <div class="split-resizer" id="split-resizer" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0">
+        <div class="split-resizer-line"></div>
+        <div class="split-resizer-handle"></div>
+      </div>
+
+      <!-- RIGHT PANEL: KNOWLEDGE GRAPH, DATA TABLE, TEXT OUTLINE & REPORT -->
+      <section class="panel panel-output" id="panel-output" aria-labelledby="panel-output-title">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <h2 class="panel-title" id="panel-output-title">Structure &amp; Topical Output</h2>
+            <nav class="tabs" role="tablist" aria-label="Output views">
+              <button type="button" class="tab on" role="tab" aria-selected="true" data-tab="graph">Knowledge graph</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" data-tab="data">Data</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" data-tab="text">Text</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" data-tab="report">Report</button>
+            </nav>
+          </div>
+        </div>
+
+        <div class="output-body">
+          <!-- Empty State -->
+          <section class="empty" id="empty">
+            <div class="empty-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6 7l4 3.5M18 7l-4 3.5M6.5 17.5l3.5-3M17.5 17.5l-3.5-3"/>
+              </svg>
+            </div>
+            <h2>Map a page&rsquo;s topical authority</h2>
+            <p>
+              Enter a URL on the left (or paste rendered HTML). The page is scraped, its heading hierarchy rebuilt and every keyword and key phrase scored for how strongly the page signals it to search engines.
+            </p>
+            <p>
+              You&rsquo;ll get an interactive knowledge graph, a downloadable keyword and section table, a plain-text topical outline and a section-by-section alignment report.
+            </p>
+            <div class="chips-demo empty-chips">
+              <button type="button" class="btn btn-sm demo" data-url="https://en.wikipedia.org/wiki/Search_engine_optimization">
+                Try: Wikipedia, SEO
+              </button>
+              <button type="button" class="btn btn-sm demo" data-url="https://ahrefs.com/blog/keyword-research/">
+                Try: Ahrefs, keyword research
+              </button>
+              <button type="button" class="btn btn-sm" id="emptySampleBtn">
+                Try: Instant HTML Sample
+              </button>
+            </div>
+          </section>
+
+          <!-- Results Container -->
+          <div id="results" hidden>
+            <!-- TAB 1: KNOWLEDGE GRAPH -->
+            <section class="view-panel on" id="p-graph">
+              <div class="toolbar">
+                <div class="seg" id="modeSeg" role="group" aria-label="Graph mode">
+                  <button type="button" data-v="clusters" class="on">Topic clusters</button>
+                  <button type="button" data-v="structure">Heading hierarchy</button>
+                </div>
+                <div class="seg" id="layoutSeg" role="group" aria-label="Graph layout">
+                  <button type="button" data-v="network" class="on">Network</button>
+                  <button type="button" data-v="tree">Tree</button>
+                </div>
+                <label class="toolbar-control">
+                  <span>Keywords</span>
+                  <input type="range" id="limit" min="15" max="120" step="5" value="50" />
+                  <span class="mono" id="limitV">50</span>
+                </label>
+                <label class="toolbar-control">
+                  <input type="checkbox" id="cooc" />
+                  <span>Co-occurrence links</span>
+                </label>
+                <label class="toolbar-control">
+                  <input type="checkbox" id="allLabels" />
+                  <span>All labels</span>
+                </label>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-xs" id="fit">Fit</button>
+                <button type="button" class="btn btn-xs" id="svgDl">Download SVG</button>
+              </div>
+
+              <div class="graph-wrap">
+                <div id="graph">
+                  <div class="hint" id="hint"></div>
+                  <div class="legend" id="legend"></div>
+                </div>
+                <aside id="detail" aria-live="polite"></aside>
+              </div>
+            </section>
+
+            <!-- TAB 2: DATA TABLE -->
+            <section class="view-panel" id="p-data">
+              <div class="toolbar">
+                <input id="filter" type="search" class="text-input filter-input" placeholder="Filter keywords…" />
+                <select id="tierSel" class="select-input select-compact" aria-label="Filter by tier">
+                  <option value="all">All tiers</option>
+                  <option value="Primary">Primary</option>
+                  <option value="Secondary">Secondary</option>
+                  <option value="Supporting">Supporting</option>
+                  <option value="Long-tail">Long-tail</option>
+                </select>
+                <select id="clusterSel" class="select-input select-compact" aria-label="Filter by cluster">
+                  <option value="all">All clusters</option>
+                </select>
+                <span class="muted mono small" id="count"></span>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-xs" id="csvKw">Download keywords CSV</button>
+                <button type="button" class="btn btn-xs" id="csvSec">Download sections CSV</button>
+              </div>
+              <div class="tablewrap">
+                <table id="tbl"></table>
+              </div>
+            </section>
+
+            <!-- TAB 3: PLAIN-TEXT OUTLINE -->
+            <section class="view-panel" id="p-text">
+              <div class="toolbar">
+                <span class="muted small">Plain-text topical outline. Paste it into a content brief, specification or ticket.</span>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-xs" id="copyTxt">Copy</button>
+                <button type="button" class="btn btn-xs" id="dlTxt">Download .txt</button>
+              </div>
+              <pre id="textOut"></pre>
+            </section>
+
+            <!-- TAB 4: WRITTEN REPORT -->
+            <section class="view-panel" id="p-report">
+              <div class="toolbar rep-actions">
+                <span class="muted small">Written structural &amp; semantic alignment report with section-by-section diagnostics.</span>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-xs" id="dlMd">Download .md</button>
+                <button type="button" class="btn btn-xs" id="printRep">Print / save PDF</button>
+              </div>
+              <article class="report" id="reportOut"></article>
+            </section>
+          </div>
+        </div>
+
+        <footer class="panel-footer">
+          <span class="footer-sources" id="output-footer-meta">Awaiting page analysis</span>
+          <span class="footer-privacy">Exports: SVG &middot; CSV &middot; TXT &middot; Markdown &middot; PDF</span>
+        </footer>
+      </section>
+    </main>
+
+    <div id="tip" role="tooltip"></div>
+  </div>
+
+  <!-- About Modal Dialogue -->
+  <dialog id="about-dialog" class="ps-about" aria-labelledby="about-page-structure-title">
+    <div class="ps-about-inner">
+      <header class="ps-about-head">
+        <h2 id="about-page-structure-title">
+          <svg class="ps-about-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6 7l4 3.5M18 7l-4 3.5M6.5 17.5l3.5-3M17.5 17.5l-3.5-3"/>
+          </svg>
+          About Semantic Page Structure
+        </h2>
+        <button type="button" class="ps-about-close" id="btn-close-about" aria-label="Close">&times;</button>
+      </header>
+
+      <p>
+        <strong>Semantic Page Structure</strong> scrapes a web page (or analyses pasted HTML), strips navigation, footers and boilerplate, rebuilds the heading hierarchy and scores every 1&ndash;4 word phrase (0&ndash;100) for how strongly the page signals it to search engines.
+      </p>
+
+      <h3>Output Views</h3>
+      <div class="ps-about-table">
+        <table>
+          <thead>
+            <tr><th>View</th><th>What it shows</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Knowledge graph</strong></td>
+              <td>Interactive D3 force-directed network and collapsible tree visualising either Topic Clusters (main topic &rarr; sub-topic clusters &rarr; keywords) or Heading Hierarchy (H1 &rarr; H2 &rarr; H3 sections, targeted heading keywords and supporting copy terms) with optional sentence co-occurrence links and SVG export.</td>
+            </tr>
+            <tr>
+              <td><strong>Data</strong></td>
+              <td>Sortable and filterable 17-column keyword table with relevance (0&ndash;100), tier, cluster, frequency, density, placement flags (title, H1, URL, meta, H2, H3, bold, alt, anchor) and first-seen position, plus one-click CSV downloads for keywords and sections.</td>
+            </tr>
+            <tr>
+              <td><strong>Text</strong></td>
+              <td>Plain-text topical outline of top keywords, topic clusters and the heading &rarr; keyword &rarr; supporting-terms tree, ready to copy or download as .txt.</td>
+            </tr>
+            <tr>
+              <td><strong>Report</strong></td>
+              <td>Written diagnostic report with a main-topic placement checklist, top keywords, topic clusters, section-by-section alignment breakdown, on-page issues and Markdown/PDF export.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Questions</h3>
+      <details>
+        <summary>How is keyword relevance (0&ndash;100) calculated?</summary>
+        <p>Every 1&ndash;4 word phrase that does not start or end with a stop word is extracted and stemmed so singular and plural forms merge. Each phrase is scored using placement weights (title 10, H1 8, URL slug 6, H2 5, meta description 5, H3 3, H4&ndash;H6 2, bold and image alt 1.5, anchor text 1), body copy frequency with diminishing returns (count^0.7), an opening-copy bonus (+2 in the first 10% of words), an exact title/H1 match bonus (+20), a specificity multiplier for multi-word phrases and a section-spread multiplier. Fragments that appear almost exclusively inside a longer phrase are discounted or removed, and scores are normalised to 0&ndash;100.</p>
+      </details>
+      <details>
+        <summary>How are topic clusters built?</summary>
+        <p>Keywords are grouped by their strongest shared stemmed term (weighted by relevance). Terms belonging to the page&rsquo;s main topic are reserved as a last resort so the clusters reveal distinct sub-topics rather than collapsing into a single group.</p>
+      </details>
+      <details>
+        <summary>What does the section alignment score measure?</summary>
+        <p>Section support (0&ndash;100) blends three on-page signals: whether the heading&rsquo;s target keywords recur in that section&rsquo;s copy (50%, with partial credit when individual words appear), how many supporting copy terms are semantically related to the heading (30%) and section depth (20%, reaching full credit at 150+ words).</p>
+      </details>
+      <details>
+        <summary>What if a page blocks scrapers or renders with client-side JavaScript?</summary>
+        <p>Click &ldquo;Paste HTML instead&rdquo; in the left panel, copy the rendered outerHTML from your browser&rsquo;s DevTools Elements panel and paste it into the studio. Keep the page URL filled in so the URL slug is still included in the scoring.</p>
+      </details>
+    </div>
+  </dialog>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

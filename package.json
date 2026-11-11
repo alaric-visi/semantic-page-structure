@@ -1,0 +1,27 @@
+{
+  "name": "semantic-page-structure",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Semantic Page Structure: Topical Authority, Heading Hierarchy & Keyword Relevance Studio",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@netlify/functions": "^5.1.0",
+    "d3": "^7.9.0",
+    "parse5": "^7.2.1"
+  },
+  "devDependencies": {
+    "@types/d3": "^7.4.3",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^3.2.7"
+  }
+}
