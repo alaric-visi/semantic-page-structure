@@ -181,29 +181,6 @@ body {
   min-width: 0;
 }
 
-#page-structure-studio .back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-decoration: none;
-  padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-#page-structure-studio .back-link:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
-  border-color: var(--border-medium);
-  text-decoration: none;
-}
-
 #page-structure-studio .title-group {
   display: flex;
   align-items: baseline;
