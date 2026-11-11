@@ -336,7 +336,26 @@ function initStudio(): void {
     renderReport();
   }
 
-  // ------------------------------------------------------------------ Summary
+  // ------------------------------------------------------------------ Summary & Neon Gauge Helper
+  function gaugeRingSvg(pct: number, centerText: string, gradId: string): string {
+    const r = 21;
+    const c = 2 * Math.PI * r;
+    const clamped = Math.max(0, Math.min(100, pct));
+    const offset = (c * (1 - clamped / 100)).toFixed(1);
+    return `<svg class="gauge-svg" viewBox="0 0 54 54" aria-hidden="true">
+      <defs>
+        <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#00e5ff" />
+          <stop offset="52%" stop-color="#3b82f6" />
+          <stop offset="100%" stop-color="#ff2a85" />
+        </linearGradient>
+      </defs>
+      <circle class="gauge-track" cx="27" cy="27" r="${r}" />
+      <circle class="gauge-fill" cx="27" cy="27" r="${r}" stroke="url(#${gradId})" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${offset}" />
+      <text class="gauge-label" x="27" y="27">${esc(centerText)}</text>
+    </svg>`;
+  }
+
   function renderSummary(): void {
     const d = state.data;
     if (!d) return;
@@ -346,6 +365,13 @@ function initStudio(): void {
       (v) => v.length,
       (k) => k.tier
     );
+    const totalKw = Math.max(1, d.keywords.length);
+    const pCount = tiers.get('Primary') || 0;
+    const sCount = tiers.get('Secondary') || 0;
+    const supCount = tiers.get('Supporting') || 0;
+    const ltCount = tiers.get('Long-tail') || 0;
+    const corePct = Math.round(((pCount + sCount) / totalKw) * 100);
+
     const secs = d.sections.filter((s) => s.level > 0);
     const avgAlign = secs.length
       ? Math.round(d3.mean(secs, (s) => s.alignment ?? 0) ?? 0)
@@ -356,17 +382,37 @@ function initStudio(): void {
     summaryEl.innerHTML = `
       <div class="card"><div class="k">Main topic</div><div class="v topic">${esc(d.main_topic?.keyword || '–')}</div>
         <div class="s" title="${esc(m.title)}">${esc(m.title || d.url)}</div></div>
-      <div class="card"><div class="k">Keywords</div><div class="v">${d.keywords.length}</div>
-        <div class="s">${tiers.get('Primary') || 0} primary · ${tiers.get('Secondary') || 0} secondary</div></div>
-      <div class="card"><div class="k">Topic clusters</div><div class="v">${d.clusters.filter((c) => c.id !== 'c_other').length}</div><div class="s">sub-topics detected</div></div>
+      <div class="card card-gauge">
+        ${gaugeRingSvg(avgAlign, `${avgAlign}%`, 'g-align')}
+        <div class="gauge-info">
+          <div class="k">Heading support</div>
+          <div class="v">${avgAlign}<span style="font-size:12px;color:var(--text-tertiary)">/100</span></div>
+          <div class="s">heading ↔ copy alignment</div>
+        </div>
+      </div>
+      <div class="card card-gauge">
+        ${gaugeRingSvg(corePct, `${corePct}%`, 'g-core')}
+        <div class="gauge-info">
+          <div class="k">Keywords</div>
+          <div class="v">${d.keywords.length}</div>
+          <div class="s">${pCount} primary · ${sCount} secondary</div>
+        </div>
+      </div>
+      <div class="card"><div class="k">Topic clusters</div><div class="v">${d.clusters.filter((c) => c.id !== 'c_other').length}</div><div class="s">sub-topics detected</div>
+        <div class="card-meter" title="Tier breakdown: Primary / Secondary / Supporting / Long-tail">
+          <span style="width:${(pCount / totalKw) * 100}%;background:#00e5ff"></span>
+          <span style="width:${(sCount / totalKw) * 100}%;background:#3b82f6"></span>
+          <span style="width:${(supCount / totalKw) * 100}%;background:#ff2a85"></span>
+          <span style="width:${(ltCount / totalKw) * 100}%;background:#9333ea"></span>
+        </div>
+      </div>
       <div class="card"><div class="k">Sections</div><div class="v">${secs.length}</div><div class="s">${
         Object.entries(m.heading_counts)
           .filter(([, v]) => v)
           .map(([k, v]) => `${v} ${k.toUpperCase()}`)
           .join(' · ') || 'no headings'
       }</div></div>
-      <div class="card"><div class="k">Words</div><div class="v">${fmt(m.word_count)}</div><div class="s">main body copy</div></div>
-      <div class="card"><div class="k">Heading support</div><div class="v">${avgAlign}<span style="font-size:12px;color:var(--text-tertiary)">/100</span></div><div class="s">avg. heading ↔ copy alignment</div></div>`;
+      <div class="card"><div class="k">Words</div><div class="v">${fmt(m.word_count)}</div><div class="s">main body copy</div></div>`;
   }
 
   // ------------------------------------------------------------------ Tabs & Graph Toolbar
@@ -673,6 +719,23 @@ function initStudio(): void {
       .insert('svg', ':first-child')
       .attr('viewBox', `0 0 ${W} ${H}`)
       .attr('xmlns', 'http://www.w3.org/2000/svg');
+
+    const defs = svg.append('defs');
+    const glowFilter = defs
+      .append('filter')
+      .attr('id', 'ps-node-glow')
+      .attr('x', '-60%')
+      .attr('y', '-60%')
+      .attr('width', '220%')
+      .attr('height', '220%');
+    glowFilter
+      .append('feGaussianBlur')
+      .attr('stdDeviation', '4.5')
+      .attr('result', 'coloredBlur');
+    const feMerge = glowFilter.append('feMerge');
+    feMerge.append('feMergeNode').attr('in', 'coloredBlur');
+    feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+
     const g = svg.append('g');
     state.zoom = d3
       .zoom<SVGSVGElement, unknown>()
@@ -800,9 +863,23 @@ function initStudio(): void {
       );
 
     node
+      .filter((n) => n.type !== 'kw' || (n.ref?.relevance ?? 0) >= 65)
       .append('circle')
+      .attr('class', 'node-halo')
+      .attr('r', (n) => n.r + (n.type === 'root' ? 8 : 5))
+      .attr('fill', (n) => nodeColor(n))
+      .attr('fill-opacity', (n) => (n.type === 'root' ? 0.22 : 0.16));
+
+    node
+      .append('circle')
+      .attr('class', 'node-core')
       .attr('r', (n) => n.r)
-      .attr('fill', (n) => nodeColor(n));
+      .attr('fill', (n) => nodeColor(n))
+      .attr('filter', (n) =>
+        n.type !== 'kw' || (n.ref?.relevance ?? 0) >= 55
+          ? 'url(#ps-node-glow)'
+          : null
+      );
     node
       .append('text')
       .attr('dy', (n) => n.r + 12)
@@ -1171,7 +1248,10 @@ function initStudio(): void {
         <h4>Strongest signals</h4>${top
           .map(
             (k) =>
-              `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:2px 0"><span>${esc(k.keyword)}</span><span class="mono muted">${k.relevance}</span></div>`
+              `<div class="signal-row">
+                <div class="signal-row-top"><span>${esc(k.keyword)}</span><span class="mono muted">${k.relevance}</span></div>
+                <div class="signal-bar-track"><div class="signal-bar-fill" style="width:${Math.max(4, k.relevance)}%"></div></div>
+              </div>`
           )
           .join('')}
         <h4>How to read this</h4><p class="muted small">Node size is relevance (0–100). Click any node for its signals. Switch to <b>Heading hierarchy</b> to see which headings target which keywords, and which copy terms back them up.</p>`;
@@ -1187,7 +1267,13 @@ function initStudio(): void {
         .filter(Boolean);
       const secName = (id: number) =>
         esc(trunc(state.secById[id]?.heading || '', 40));
-      el.innerHTML = `<h3>${esc(k.keyword)}</h3><span class="tier ${esc(k.tier)}">${esc(k.tier)}</span> <span class="muted small">Rank #${k.rank} · cluster: ${esc(k.cluster)}</span>
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          ${gaugeRingSvg(k.relevance, String(Math.round(k.relevance)), 'g-det-kw')}
+          <div style="min-width:0;flex:1">
+            <h3>${esc(k.keyword)}</h3>
+            <span class="tier ${esc(k.tier)}">${esc(k.tier)}</span> <span class="muted small">Rank #${k.rank} · ${esc(k.cluster)}</span>
+          </div>
+        </div>
         <dl><dt>Relevance</dt><dd><b>${k.relevance}</b> / 100</dd><dt>Frequency</dt><dd>${k.frequency} (${k.body_count} in body copy)</dd>
         <dt>Density</dt><dd>${k.density}%</dd><dt>Sections</dt><dd>${k.section_count}</dd>
         <dt>First seen</dt><dd>${k.first_position == null ? 'headings only' : k.first_position + '% into the copy'}</dd></dl>
@@ -1200,26 +1286,44 @@ function initStudio(): void {
 
     if (d.type === 'cluster') {
       const c: ClusterEntry = d.ref;
-      el.innerHTML = `<h3>${esc(c.label)}</h3><div class="muted small">Topic cluster · ${c.keywords.length} keywords · avg relevance ${c.avg_relevance}</div>
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          ${gaugeRingSvg(c.avg_relevance, String(Math.round(c.avg_relevance)), 'g-det-cl')}
+          <div style="min-width:0;flex:1">
+            <h3>${esc(c.label)}</h3>
+            <div class="muted small">Topic cluster · ${c.keywords.length} keywords · avg ${c.avg_relevance}</div>
+          </div>
+        </div>
         <h4>Keywords</h4>${c.keywords
           .map((id) => state.kwById[id])
           .filter(Boolean)
           .map(
             (k) =>
-              `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:2px 0"><span>${esc(k.keyword)}</span><span class="mono muted">${k.relevance}</span></div>`
+              `<div class="signal-row">
+                <div class="signal-row-top"><span>${esc(k.keyword)}</span><span class="mono muted">${k.relevance}</span></div>
+                <div class="signal-bar-track"><div class="signal-bar-fill" style="width:${Math.max(4, k.relevance)}%"></div></div>
+              </div>`
           )
           .join('')}`;
       return;
     }
 
     const s: SectionEntry = d.ref;
-    el.innerHTML = `<h3>${esc(s.heading)}</h3><div class="muted small">${s.level === 0 ? 'Page' : esc(s.tag.toUpperCase())} · ${s.cumulative_word_count} words${s.alignment != null ? ` · ${esc(s.alignment_label)} support (${s.alignment}/100)` : ''}</div>
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        ${s.alignment != null ? gaugeRingSvg(s.alignment, `${s.alignment}%`, 'g-det-sec') : ''}
+        <div style="min-width:0;flex:1">
+          <h3>${esc(s.heading)}</h3>
+          <div class="muted small">${s.level === 0 ? 'Page' : esc(s.tag.toUpperCase())} · ${s.cumulative_word_count} words${s.alignment != null ? ` · ${esc(s.alignment_label)} support (${s.alignment}/100)` : ''}</div>
+        </div>
+      </div>
       <h4>Heading keywords</h4>${s.heading_keywords.length ? s.heading_keywords.map((h) => `<span class="tag on">${esc(h.keyword)} · ${h.copy_mentions}× in copy</span>`).join('') : `<span class="muted small">None</span>`}
       <h4>Supported by</h4>${
         s.supporting_keywords
           .map(
             (h) =>
-              `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:2px 0"><span>${esc(h.keyword)}${h.related_to_heading ? ' ●' : ''}</span><span class="mono muted">${h.mentions}× · ${h.support}</span></div>`
+              `<div class="signal-row">
+                <div class="signal-row-top"><span>${esc(h.keyword)}${h.related_to_heading ? ' ●' : ''}</span><span class="mono muted">${h.mentions}× · ${h.support}</span></div>
+                <div class="signal-bar-track"><div class="signal-bar-fill" style="width:${Math.max(6, Math.min(100, h.support))}%"></div></div>
+              </div>`
           )
           .join('') || `<span class="muted small">No supporting copy</span>`
       }
