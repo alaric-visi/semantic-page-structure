@@ -383,6 +383,73 @@ body {
   flex: 1;
 }
 
+/* Collapsed Left Panel Rail */
+#page-structure-studio .sidebar-collapsed-rail {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  width: 38px;
+  min-width: 38px;
+  height: 100%;
+  margin-right: 10px;
+  padding: 14px 0;
+  background: linear-gradient(180deg, rgba(13, 21, 46, 0.94) 0%, rgba(8, 13, 30, 0.98) 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  position: relative;
+  overflow: hidden;
+}
+
+#page-structure-studio .sidebar-collapsed-rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-blue) 100%);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+#page-structure-studio .sidebar-collapsed-rail:hover {
+  border-color: var(--accent);
+  color: #ffffff;
+  background: linear-gradient(180deg, rgba(18, 30, 64, 0.96) 0%, rgba(10, 17, 38, 0.98) 100%);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.2);
+}
+
+#page-structure-studio .sidebar-rail-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+#page-structure-studio .btn-sidebar-toggle {
+  border-color: rgba(0, 229, 255, 0.28);
+  background: rgba(0, 229, 255, 0.08);
+  color: #dbf8ff;
+}
+
+#page-structure-studio .btn-sidebar-toggle:hover:not(:disabled) {
+  background: rgba(0, 229, 255, 0.18);
+  border-color: var(--accent);
+}
+
 /* View Switcher overrides */
 #page-structure-studio[data-view="input"] .panel-input {
   width: 100% !important;
@@ -392,6 +459,9 @@ body {
   display: none !important;
 }
 
+#page-structure-studio[data-view="output"] .sidebar-collapsed-rail {
+  display: flex;
+}
 #page-structure-studio[data-view="output"] .panel-input,
 #page-structure-studio[data-view="output"] .split-resizer {
   display: none !important;
@@ -1723,6 +1793,19 @@ body {
     flex-direction: column;
     overflow: visible;
     gap: 10px;
+  }
+
+  #page-structure-studio .sidebar-collapsed-rail {
+    flex-direction: row;
+    width: 100%;
+    height: 38px;
+    margin-right: 0;
+    padding: 0 14px;
+  }
+
+  #page-structure-studio .sidebar-rail-label {
+    writing-mode: horizontal-tb;
+    transform: none;
   }
 
   #page-structure-studio .panel-input,

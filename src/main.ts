@@ -132,21 +132,51 @@ function initStudio(): void {
     _graph: null,
   };
 
-  // ------------------------------------------------------------------ View Switcher & Split Resizer
+  // ------------------------------------------------------------------ View Switcher, Collapsible Left Panel & Split Resizer
   const viewButtons = $$<HTMLButtonElement>('.segment-btn[data-view]');
+  const btnCollapseSidebar = $<HTMLButtonElement>('#btn-collapse-sidebar');
+  const btnToggleSidebar = $<HTMLButtonElement>('#btn-toggle-sidebar');
+  const btnToggleSidebarLabel = $('#btn-toggle-sidebar-label');
+  const sidebarCollapsedRail = $<HTMLButtonElement>('#sidebar-collapsed-rail');
+
+  function setViewMode(v: string): void {
+    rootEl!.setAttribute('data-view', v);
+    const isLeftOpen = v !== 'output';
+    viewButtons.forEach((b) => {
+      const active = b.dataset.view === v;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', String(active));
+    });
+    btnCollapseSidebar?.setAttribute('aria-expanded', String(isLeftOpen));
+    btnToggleSidebar?.setAttribute('aria-expanded', String(isLeftOpen));
+    sidebarCollapsedRail?.setAttribute('aria-expanded', String(isLeftOpen));
+    if (btnToggleSidebarLabel) {
+      btnToggleSidebarLabel.textContent = isLeftOpen
+        ? 'Hide Input'
+        : 'Open Input';
+    }
+    if (v !== 'input' && state.data) {
+      setTimeout(() => renderGraph(), 60);
+    }
+  }
+
   viewButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
-      const v = btn.dataset.view || 'split';
-      rootEl.setAttribute('data-view', v);
-      viewButtons.forEach((b) => {
-        const active = b === btn;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', String(active));
-      });
-      if (v !== 'input' && state.data) {
-        setTimeout(() => renderGraph(), 60);
-      }
+      setViewMode(btn.dataset.view || 'split');
     });
+  });
+
+  btnCollapseSidebar?.addEventListener('click', () => {
+    setViewMode('output');
+  });
+
+  sidebarCollapsedRail?.addEventListener('click', () => {
+    setViewMode('split');
+  });
+
+  btnToggleSidebar?.addEventListener('click', () => {
+    const cur = rootEl!.getAttribute('data-view') || 'split';
+    setViewMode(cur === 'output' ? 'split' : 'output');
   });
 
   const resizer = $('#split-resizer');
