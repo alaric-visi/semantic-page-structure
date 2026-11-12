@@ -1438,6 +1438,13 @@ body {
   box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
 }
 
+#page-structure-studio .hud-3d-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(56, 189, 248, 0.25);
+  margin: 0 2px;
+}
+
 #page-structure-studio .legend {
   position: absolute;
   left: 12px;

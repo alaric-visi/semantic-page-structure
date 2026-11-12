@@ -764,8 +764,18 @@ function initStudio(): void {
   let reset3d: (() => void) | null = null;
   let export3dSvg: (() => string) | null = null;
   let last3dMode: 'clusters' | 'structure' | null = null;
+  let dragTool3d: 'pan' | 'orbit' = 'pan';
   const CAM3D_DEFAULT = { yaw: -0.42, pitch: 0.36, zoom: 1.15, tx: 0, ty: 0, tz: 0 };
   const cam3d = { ...CAM3D_DEFAULT };
+
+  function update3dHint(): void {
+    const hintEl = $('#hint');
+    if (!hintEl || state.layout !== 'network') return;
+    hintEl.textContent =
+      dragTool3d === 'pan'
+        ? 'Drag: move · Right/Shift-drag: rotate · Scroll: zoom at cursor · Dbl-click: focus'
+        : 'Drag: rotate · Right/Shift-drag: move · Scroll: zoom at cursor · Dbl-click: focus';
+  }
 
   function nodeColor(n: { type: string; other?: boolean; ref?: any }): string {
     if (n.type === 'root') return css('--n-root');
@@ -818,9 +828,11 @@ function initStudio(): void {
     }
     const hintEl = $('#hint');
     if (hintEl) {
-      hintEl.textContent = is3d
-        ? 'Drag: orbit · Right/Shift-drag: pan · Scroll: zoom · Dbl-click: focus'
-        : 'Click a branch node to collapse/expand';
+      if (is3d) {
+        update3dHint();
+      } else {
+        hintEl.textContent = 'Click a branch node to collapse/expand';
+      }
     }
 
     if (is3d) {
@@ -1248,6 +1260,9 @@ function initStudio(): void {
     const hudCtrl = document.createElement('div');
     hudCtrl.className = 'hud-3d-controls';
     hudCtrl.innerHTML = `
+      <button type="button" class="hud-3d-btn ${dragTool3d === 'pan' ? 'on' : ''}" id="hud3d-pan" aria-pressed="${dragTool3d === 'pan'}" title="Drag to move the graph">Move</button>
+      <button type="button" class="hud-3d-btn ${dragTool3d === 'orbit' ? 'on' : ''}" id="hud3d-rotate" aria-pressed="${dragTool3d === 'orbit'}" title="Drag to rotate in 3D">Rotate</button>
+      <span class="hud-3d-sep" aria-hidden="true"></span>
       <button type="button" class="hud-3d-btn" id="hud3d-zin" title="Zoom in">+</button>
       <button type="button" class="hud-3d-btn" id="hud3d-zout" title="Zoom out">&minus;</button>
       <button type="button" class="hud-3d-btn" id="hud3d-reset" title="Reset 3D camera">Reset</button>
@@ -1646,7 +1661,22 @@ function initStudio(): void {
       dirty = true;
     };
 
-    // Pointer Interaction (1:1 immediate drag anywhere, inertia on release, Shift/Right-drag pan)
+    // Shared camera-space to world-target displacement helper
+    const shiftCamTargetByCamXY = (ux: number, uy: number) => {
+      const cy = Math.cos(cam3d.yaw);
+      const sy = Math.sin(cam3d.yaw);
+      const cp = Math.cos(cam3d.pitch);
+      const sp = Math.sin(cam3d.pitch);
+      const maxT = R * 1.8;
+      cam3d.tx = Math.max(-maxT, Math.min(maxT, cam3d.tx + (ux * cy - uy * sy * sp)));
+      cam3d.ty = Math.max(-maxT, Math.min(maxT, cam3d.ty + uy * cp));
+      cam3d.tz = Math.max(-maxT, Math.min(maxT, cam3d.tz - (ux * sy + uy * cy * sp)));
+      camTarget.tx = cam3d.tx;
+      camTarget.ty = cam3d.ty;
+      camTarget.tz = cam3d.tz;
+    };
+
+    // Pointer Interaction (default Move/pan like Tree view; Rotate toggle or Shift/Right-drag for 3D orbit)
     let dragMode: 'orbit' | 'pan' | null = null;
     let lastX = 0;
     let lastY = 0;
@@ -1656,7 +1686,15 @@ function initStudio(): void {
 
     canvas.addEventListener('pointerdown', (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
-      dragMode = e.button === 2 || e.button === 1 || e.shiftKey ? 'pan' : 'orbit';
+      const wantsAlt = e.button === 2 || e.button === 1 || e.shiftKey;
+      dragMode =
+        dragTool3d === 'pan'
+          ? wantsAlt
+            ? 'orbit'
+            : 'pan'
+          : wantsAlt
+            ? 'pan'
+            : 'orbit';
       lastX = e.clientX;
       lastY = e.clientY;
       moved = 0;
@@ -1689,20 +1727,9 @@ function initStudio(): void {
           velYaw = dYaw * 0.85;
           velPitch = dPitch * 0.85;
         } else {
-          // Orthonormal screen-plane pan in world coordinates
-          const cy = Math.cos(cam3d.yaw);
-          const sy = Math.sin(cam3d.yaw);
-          const cp = Math.cos(cam3d.pitch);
-          const sp = Math.sin(cam3d.pitch);
+          // 1:1 screen-plane drag in world coordinates
           const scale = 1 / (baseScale * cam3d.zoom);
-          const ux = dx * scale;
-          const uy = dy * scale;
-          cam3d.tx -= ux * cy - uy * sy * sp;
-          cam3d.ty -= uy * cp;
-          cam3d.tz += ux * sy + uy * cy * sp;
-          camTarget.tx = cam3d.tx;
-          camTarget.ty = cam3d.ty;
-          camTarget.tz = cam3d.tz;
+          shiftCamTargetByCamXY(-dx * scale, -dy * scale);
         }
         hideTip();
         dirty = true;
@@ -1712,7 +1739,7 @@ function initStudio(): void {
       const hit = hitTest(mx, my);
       if (hit !== hovered) {
         hovered = hit;
-        canvas.style.cursor = hit ? 'pointer' : 'grab';
+        canvas.style.cursor = hit ? 'pointer' : dragTool3d === 'pan' ? 'move' : 'grab';
         dirty = true;
       }
       if (hit) {
@@ -1763,15 +1790,35 @@ function initStudio(): void {
       }
     });
 
+    // Cursor-anchored wheel zoom so zooming magnifies the cluster under the pointer instead of pulling to center
     canvas.addEventListener(
       'wheel',
       (e: WheelEvent) => {
         e.preventDefault();
         flying = false;
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const oldZoom = cam3d.zoom;
         const factor = Math.exp(-e.deltaY * 0.0018);
-        camTarget.zoom = Math.max(0.35, Math.min(6, camTarget.zoom * factor));
-        cam3d.zoom = camTarget.zoom;
-        dirty = true;
+        const newZoom = Math.max(0.35, Math.min(6, oldZoom * factor));
+        if (newZoom !== oldZoom) {
+          let anchorPs = 1;
+          let bestD2 = 120 * 120;
+          for (const n of nodes) {
+            if (n._px == null || n._py == null || n._ps == null) continue;
+            const d2 = (mx - n._px) ** 2 + (my - n._py) ** 2;
+            if (d2 < bestD2) {
+              bestD2 = d2;
+              anchorPs = n._ps;
+            }
+          }
+          const invScale = (1 / oldZoom - 1 / newZoom) / (baseScale * anchorPs);
+          shiftCamTargetByCamXY((mx - W / 2) * invScale, (my - H / 2) * invScale);
+          cam3d.zoom = newZoom;
+          camTarget.zoom = newZoom;
+          dirty = true;
+        }
       },
       { passive: false }
     );
@@ -1789,7 +1836,35 @@ function initStudio(): void {
       flyTo(target);
     });
 
+    const panBtn = hudCtrl.querySelector<HTMLButtonElement>('#hud3d-pan');
+    const rotateBtn = hudCtrl.querySelector<HTMLButtonElement>('#hud3d-rotate');
+    const setDragTool = (tool: 'pan' | 'orbit') => {
+      dragTool3d = tool;
+      panBtn?.classList.toggle('on', tool === 'pan');
+      panBtn?.setAttribute('aria-pressed', String(tool === 'pan'));
+      rotateBtn?.classList.toggle('on', tool === 'orbit');
+      rotateBtn?.setAttribute('aria-pressed', String(tool === 'orbit'));
+      if (!hovered) canvas.style.cursor = tool === 'pan' ? 'move' : 'grab';
+      update3dHint();
+    };
+    panBtn?.addEventListener('click', () => setDragTool('pan'));
+    rotateBtn?.addEventListener('click', () => setDragTool('orbit'));
+    if (!hovered) canvas.style.cursor = dragTool3d === 'pan' ? 'move' : 'grab';
+
     hudCtrl.querySelector('#hud3d-zin')?.addEventListener('click', () => {
+      if (
+        state.selected &&
+        Math.abs(cam3d.tx) < 1 &&
+        Math.abs(cam3d.ty) < 1 &&
+        Math.abs(cam3d.tz) < 1
+      ) {
+        const sel = byId.get(state.selected);
+        if (sel && sel.id !== rootNode.id) {
+          camTarget.tx = sel.x!;
+          camTarget.ty = sel.y!;
+          camTarget.tz = sel.z!;
+        }
+      }
       camTarget.zoom = Math.min(6, camTarget.zoom * 1.28);
       flying = true;
       dirty = true;
