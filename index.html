@@ -312,6 +312,34 @@
                 <span class="spacer"></span>
                 <button type="button" class="btn btn-xs" id="fit">Fit</button>
                 <button type="button" class="btn btn-xs" id="svgDl">Download SVG</button>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-icon btn-fullscreen-enter"
+                  id="graphFullscreenBtn"
+                  title="Full screen"
+                  aria-label="Full screen"
+                  aria-pressed="false"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <polyline points="9 21 3 21 3 15"></polyline>
+                    <line x1="21" y1="3" x2="14" y2="10"></line>
+                    <line x1="3" y1="21" x2="10" y2="14"></line>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-fullscreen-close"
+                  id="graphExitFullscreenBtn"
+                  title="Close full screen (Esc)"
+                  aria-label="Close full screen"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                  <span>Close full screen</span>
+                </button>
               </div>
 
               <div class="graph-wrap">

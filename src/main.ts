@@ -147,7 +147,41 @@ function initStudio(): void {
   const btnToggleSidebarLabel = $('#btn-toggle-sidebar-label');
   const sidebarCollapsedRail = $<HTMLButtonElement>('#sidebar-collapsed-rail');
 
+  const graphPanelEl = $('#p-graph');
+  const graphFullscreenBtn = $<HTMLButtonElement>('#graphFullscreenBtn');
+  const graphExitFullscreenBtn = $<HTMLButtonElement>('#graphExitFullscreenBtn');
+
+  function setGraphFullscreen(on: boolean, moveFocus = false): void {
+    if (!graphPanelEl) return;
+    const wasOn = graphPanelEl.classList.contains('is-fullscreen');
+    if (wasOn === on) return;
+    graphPanelEl.classList.toggle('is-fullscreen', on);
+    rootEl!.classList.toggle('is-graph-fullscreen', on);
+    graphFullscreenBtn?.setAttribute('aria-pressed', String(on));
+    if (moveFocus) {
+      (on ? graphExitFullscreenBtn : graphFullscreenBtn)?.focus();
+    }
+    if (state.data && graphPanelEl.classList.contains('on')) {
+      requestAnimationFrame(() => renderGraph());
+    }
+  }
+
+  graphFullscreenBtn?.addEventListener('click', () => {
+    setGraphFullscreen(true, true);
+  });
+
+  graphExitFullscreenBtn?.addEventListener('click', () => {
+    setGraphFullscreen(false, true);
+  });
+
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && graphPanelEl?.classList.contains('is-fullscreen')) {
+      setGraphFullscreen(false, true);
+    }
+  });
+
   function setViewMode(v: string): void {
+    if (v === 'input') setGraphFullscreen(false);
     rootEl!.setAttribute('data-view', v);
     const isLeftOpen = v !== 'output';
     viewButtons.forEach((b) => {
@@ -465,6 +499,7 @@ function initStudio(): void {
         p.classList.toggle('on', p.id === 'p-' + t.dataset.tab)
       );
       if (t.dataset.tab === 'graph') renderGraph();
+      else setGraphFullscreen(false);
     });
   });
 
