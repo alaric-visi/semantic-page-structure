@@ -725,10 +725,10 @@ function initStudio(): void {
   }
 
   // ------------------------------------------------------------------ Graph Render
-  let sim: d3.Simulation<GraphNode, GraphLink> | null = null;
   let stop3d: (() => void) | null = null;
   let reset3d: (() => void) | null = null;
   let export3dSvg: (() => string) | null = null;
+  let last3dMode: 'clusters' | 'structure' | null = null;
   const CAM3D_DEFAULT = { yaw: -0.42, pitch: 0.36, zoom: 1.15, tx: 0, ty: 0, tz: 0 };
   const cam3d = { ...CAM3D_DEFAULT };
 
@@ -748,10 +748,6 @@ function initStudio(): void {
     if (!state.data || !graphPanel || !graphPanel.classList.contains('on')) {
       return;
     }
-    if (sim) {
-      sim.stop();
-      sim = null;
-    }
     if (stop3d) {
       stop3d();
       stop3d = null;
@@ -760,8 +756,8 @@ function initStudio(): void {
     export3dSvg = null;
     const box = $('#graph');
     if (!box) return;
-    // 3D is used only for the Network layout in Heading hierarchy mode
-    const is3d = state.layout === 'network' && state.mode === 'structure';
+    // 3D canvas style applies to Network layout (both Topic Clusters and Heading Hierarchy)
+    const is3d = state.layout === 'network';
     box.classList.toggle('is-3d', is3d);
     box.querySelectorAll('svg, canvas.graph-3d-canvas, .hud-3d-top, .hud-3d-controls').forEach((el) => el.remove());
     const W = box.clientWidth || 720;
@@ -789,14 +785,17 @@ function initStudio(): void {
     if (hintEl) {
       hintEl.textContent = is3d
         ? 'Drag: orbit · Right/Shift-drag: pan · Scroll: zoom · Dbl-click: focus'
-        : state.layout === 'network'
-          ? 'Scroll to zoom · drag nodes · click for details'
-          : 'Click a branch node to collapse/expand';
+        : 'Click a branch node to collapse/expand';
     }
 
     if (is3d) {
       state.zoom = null;
-      const { nodes, links } = buildStructureGraph();
+      if (last3dMode !== mode) {
+        Object.assign(cam3d, CAM3D_DEFAULT);
+        last3dMode = mode;
+      }
+      const { nodes, links } =
+        mode === 'clusters' ? buildClusterGraph() : buildStructureGraph();
       if (!nodes.length) return;
       if (state.cooc) {
         const ids = new Set(nodes.map((n) => n.id));
@@ -860,185 +859,10 @@ function initStudio(): void {
       if (e.target === svg.node()) select(null);
     });
 
-    if (state.layout === 'tree') {
-      renderTree(svg, g, W, H);
-      return;
-    }
-
-    const { nodes, links } =
-      mode === 'clusters' ? buildClusterGraph() : buildStructureGraph();
-    if (!nodes.length) return;
-
-    if (state.cooc) {
-      const ids = new Set(nodes.map((n) => n.id));
-      state.data.cooccurrence.forEach((e) => {
-        if (ids.has('k:' + e.source) && ids.has('k:' + e.target)) {
-          links.push({
-            source: 'k:' + e.source,
-            target: 'k:' + e.target,
-            kind: 'cooc',
-            dist: 80,
-            w: e.weight,
-          });
-        }
-      });
-    }
-
-    const labelSet = new Set(
-      nodes
-        .filter((n) => n.type !== 'kw')
-        .map((n) => n.id)
-        .concat(
-          nodes
-            .filter((n) => n.type === 'kw')
-            .sort((a, b) => b.ref.relevance - a.ref.relevance)
-            .slice(0, 22)
-            .map((n) => n.id)
-        )
-    );
-
-    const link = g
-      .append('g')
-      .selectAll<SVGLineElement, GraphLink>('line')
-      .data(links)
-      .join('line')
-      .attr('stroke', (l) =>
-        l.kind === 'cooc'
-          ? css('--n-cluster')
-          : l.kind === 'heading'
-            ? css('--link-strong')
-            : css('--link')
-      )
-      .attr('stroke-width', (l) =>
-        l.kind === 'cooc'
-          ? Math.min(4, 0.6 + (l.w || 1) * 0.35)
-          : l.kind === 'heading'
-            ? 1.8
-            : 1.1
-      )
-      .attr('stroke-dasharray', (l) =>
-        l.kind === 'support' ? '3 3' : l.kind === 'cooc' ? '1 3' : null
-      )
-      .attr('stroke-opacity', (l) => (l.kind === 'cooc' ? 0.55 : 1));
-
-    const node = g
-      .append('g')
-      .selectAll<SVGGElement, GraphNode>('g')
-      .data(nodes)
-      .join('g')
-      .attr(
-        'class',
-        (n) =>
-          `node ${n.type === 'root' ? 'root' : n.type !== 'kw' ? 'hub' : ''}`
-      )
-      .call(
-        d3
-          .drag<SVGGElement, GraphNode>()
-          .on('start', (e, d) => {
-            if (!e.active && sim) sim.alphaTarget(0.25).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on('drag', (e, d) => {
-            d.fx = e.x;
-            d.fy = e.y;
-          })
-          .on('end', (e, d) => {
-            if (!e.active && sim) sim.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          })
-      );
-
-    node
-      .filter((n) => n.type !== 'kw' || (n.ref?.relevance ?? 0) >= 65)
-      .append('circle')
-      .attr('class', 'node-halo')
-      .attr('r', (n) => n.r + (n.type === 'root' ? 8 : 5))
-      .attr('fill', (n) => nodeColor(n))
-      .attr('fill-opacity', (n) => (n.type === 'root' ? 0.22 : 0.16));
-
-    node
-      .append('circle')
-      .attr('class', 'node-core')
-      .attr('r', (n) => n.r)
-      .attr('fill', (n) => nodeColor(n))
-      .attr('filter', (n) =>
-        n.type !== 'kw' || (n.ref?.relevance ?? 0) >= 55
-          ? 'url(#ps-node-glow)'
-          : null
-      );
-    node
-      .append('text')
-      .attr('dy', (n) => n.r + 12)
-      .attr('text-anchor', 'middle')
-      .text((n) => trunc(n.label, n.type === 'section' ? 34 : 30))
-      .attr('display', (n) =>
-        !n.dup && (state.allLabels || labelSet.has(n.id)) ? null : 'none'
-      );
-
-    node
-      .on('mouseenter', (e, n) => tip(e, n))
-      .on('mousemove', (e) => moveTip(e))
-      .on('mouseleave', () => hideTip())
-      .on('click', (e, n) => {
-        e.stopPropagation();
-        select(n);
-      });
-
-    const rootNode = nodes[0];
-    rootNode.x = W / 2;
-    rootNode.y = H / 2;
-
-    sim = d3
-      .forceSimulation<GraphNode>(nodes)
-      .force(
-        'link',
-        d3
-          .forceLink<GraphNode, GraphLink>(links)
-          .id((n) => n.id)
-          .distance((l) => l.dist)
-          .strength((l) => (l.kind === 'cooc' ? 0.04 : 0.7))
-      )
-      .force(
-        'charge',
-        d3
-          .forceManyBody<GraphNode>()
-          .strength((n) =>
-            n.type === 'root' ? -900 : n.type === 'kw' ? -110 : -380
-          )
-      )
-      .force(
-        'collide',
-        d3.forceCollide<GraphNode>((n) => n.r + 5)
-      )
-      .force('x', d3.forceX<GraphNode>(W / 2).strength(0.04))
-      .force('y', d3.forceY<GraphNode>(H / 2).strength(0.04))
-      .stop();
-
-    const draw = () => {
-      link
-        .attr('x1', (l) => (l.source as GraphNode).x ?? 0)
-        .attr('y1', (l) => (l.source as GraphNode).y ?? 0)
-        .attr('x2', (l) => (l.target as GraphNode).x ?? 0)
-        .attr('y2', (l) => (l.target as GraphNode).y ?? 0);
-      node.attr('transform', (n) => `translate(${n.x ?? 0},${n.y ?? 0})`);
-    };
-
-    for (let i = 0; i < 320; i++) sim.tick();
-    draw();
-    fit(svg, g, 0);
-    sim.on('tick', draw);
-
-    state._graph = { node, link, links };
-    if (state.selected) {
-      const n = nodes.find((x) => x.id === state.selected);
-      if (n) highlight(n);
-      else state.selected = null;
-    }
+    renderTree(svg, g, W, H);
   }
 
-  // ------------------------------------------------------------------ 3D Network (Heading hierarchy only, High-DPI Canvas)
+  // ------------------------------------------------------------------ 3D Network (Topic Clusters & Heading Hierarchy, High-DPI Canvas)
   function render3D(
     W: number,
     H: number,
@@ -1048,6 +872,7 @@ function initStudio(): void {
     box: HTMLElement,
     graphPanel: HTMLElement
   ): void {
+    const isClusters = state.mode === 'clusters';
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const links: GraphLink[] = [];
     rawLinks.forEach((l) => {
@@ -1073,14 +898,15 @@ function initStudio(): void {
       return c;
     };
 
-    // Build section tree from tree links so sections form a spacious 3D tiered constellation
-    const childSecs = new Map<string, GraphNode[]>();
-    const treeLinks = links.filter((l) => l.kind === 'tree');
-    treeLinks.forEach((l) => {
+    // Build hub tree from non-keyword tree links (sections in structure mode, clusters in clusters mode)
+    const childHubs = new Map<string, GraphNode[]>();
+    links.forEach((l) => {
+      if (l.kind !== 'tree') return;
+      const target = l.target as GraphNode;
+      if (target.type === 'kw') return;
       const pid = (l.source as GraphNode).id;
-      const cid = (l.target as GraphNode);
-      if (!childSecs.has(pid)) childSecs.set(pid, []);
-      childSecs.get(pid)!.push(cid);
+      if (!childHubs.has(pid)) childHubs.set(pid, []);
+      childHubs.get(pid)!.push(target);
     });
 
     const anchor = new Map<string, { x: number; y: number; z: number }>();
@@ -1090,12 +916,12 @@ function initStudio(): void {
     rootNode.z = 0;
     anchor.set(rootNode.id, { x: 0, y: -210, z: 0 });
 
-    const topSecs = childSecs.get(rootNode.id) || [];
-    const M = Math.max(1, topSecs.length);
-    const baseR1 = Math.max(270, M * 58);
+    const topHubs = childHubs.get(rootNode.id) || [];
+    const M = Math.max(1, topHubs.length);
+    const baseR1 = isClusters ? Math.max(290, M * 68) : Math.max(270, M * 58);
 
     const placeSubtree = (
-      sec: GraphNode,
+      hub: GraphNode,
       ang: number,
       span: number,
       rad: number,
@@ -1103,12 +929,12 @@ function initStudio(): void {
     ) => {
       const x = Math.cos(ang) * rad;
       const z = Math.sin(ang) * rad;
-      sec.x = x;
-      sec.y = yPos;
-      sec.z = z;
-      anchor.set(sec.id, { x, y: yPos, z });
+      hub.x = x;
+      hub.y = yPos;
+      hub.z = z;
+      anchor.set(hub.id, { x, y: yPos, z });
 
-      const kids = childSecs.get(sec.id) || [];
+      const kids = childHubs.get(hub.id) || [];
       if (!kids.length) return;
       const childSpan = Math.min(Math.PI * 0.72, span * 0.92);
       kids.forEach((kid, idx) => {
@@ -1120,67 +946,71 @@ function initStudio(): void {
       });
     };
 
-    topSecs.forEach((sec, i) => {
+    topHubs.forEach((hub, i) => {
       const ang = (i / M) * Math.PI * 2 - Math.PI / 2;
       const span = (Math.PI * 1.8) / M;
-      const yPos = -40 + (i % 2 === 0 ? -36 : 36);
-      placeSubtree(sec, ang, span, baseR1, yPos);
+      const rad = hub.other ? baseR1 + 75 : baseR1;
+      const yPos = (hub.other ? 45 : -30) + (i % 2 === 0 ? -42 : 42);
+      placeSubtree(hub, ang, span, rad, yPos);
     });
 
-    // Place keywords cleanly around their owning section(s), pushed outward from center
-    const kwLinks = new Map<string, { sec: GraphNode; kind: 'heading' | 'support' }[]>();
+    // Place keywords cleanly around their owning section/cluster(s), pushed outward from center
+    const kwLinks = new Map<string, { hub: GraphNode; kind: GraphLink['kind'] }[]>();
     links.forEach((l) => {
-      if (l.kind !== 'heading' && l.kind !== 'support') return;
       const s = l.source as GraphNode;
       const t = l.target as GraphNode;
+      const isClusterKwLink = l.kind === 'tree' && (s.type === 'kw' || t.type === 'kw');
+      if (l.kind !== 'heading' && l.kind !== 'support' && !isClusterKwLink) return;
       const kw = t.type === 'kw' ? t : s.type === 'kw' ? s : null;
-      const sec = t.type === 'kw' ? s : t;
-      if (!kw || !sec) return;
+      const hub = t.type === 'kw' ? s : t;
+      if (!kw || !hub || hub.type === 'kw') return;
       if (!kwLinks.has(kw.id)) kwLinks.set(kw.id, []);
-      kwLinks.get(kw.id)!.push({ sec, kind: l.kind });
+      kwLinks.get(kw.id)!.push({ hub, kind: l.kind });
     });
 
-    const secHeadingKws = new Map<string, GraphNode[]>();
-    const secSupportKws = new Map<string, GraphNode[]>();
-    const sharedKws: { kw: GraphNode; secs: GraphNode[] }[] = [];
+    const hubInnerKws = new Map<string, GraphNode[]>();
+    const hubOuterKws = new Map<string, GraphNode[]>();
+    const sharedKws: { kw: GraphNode; hubs: GraphNode[] }[] = [];
 
     nodes.forEach((n) => {
       if (n.type !== 'kw') return;
       const owners = kwLinks.get(n.id) || [];
-      const uniqueSecs = Array.from(new Set(owners.map((o) => o.sec)));
-      const headingOwner = owners.find((o) => o.kind === 'heading')?.sec;
+      const uniqueHubs = Array.from(new Set(owners.map((o) => o.hub)));
+      const headingOwner = owners.find((o) => o.kind === 'heading')?.hub;
 
-      if (uniqueSecs.length > 1 && !headingOwner) {
-        sharedKws.push({ kw: n, secs: uniqueSecs });
+      if (!isClusters && uniqueHubs.length > 1 && !headingOwner) {
+        sharedKws.push({ kw: n, hubs: uniqueHubs });
       } else {
-        const primary = headingOwner || uniqueSecs[0] || rootNode;
-        const isHead = owners.some((o) => o.sec === primary && o.kind === 'heading');
-        const bucket = isHead ? secHeadingKws : secSupportKws;
+        const primary = headingOwner || uniqueHubs[0] || rootNode;
+        const isInner = isClusters
+          ? (n.ref?.relevance ?? 0) >= 45
+          : owners.some((o) => o.hub === primary && o.kind === 'heading');
+        const bucket = isInner ? hubInnerKws : hubOuterKws;
         if (!bucket.has(primary.id)) bucket.set(primary.id, []);
         bucket.get(primary.id)!.push(n);
       }
     });
 
     const placeKwRing = (
-      sec: GraphNode,
+      hub: GraphNode,
       kws: GraphNode[],
       orbitR: number,
       yBase: number,
       arcSpan: number
     ) => {
       if (!kws.length) return;
-      const sx = sec.x || 0;
-      const sy = sec.y || 0;
-      const sz = sec.z || 0;
-      const isRootSec = sec.id === rootNode.id;
-      const outAng = isRootSec ? -Math.PI / 2 : Math.atan2(sz, sx);
+      const sx = hub.x || 0;
+      const sy = hub.y || 0;
+      const sz = hub.z || 0;
+      const isRootHub = hub.id === rootNode.id;
+      const outAng = isRootHub ? -Math.PI / 2 : Math.atan2(sz, sx);
       const count = kws.length;
-      const span = isRootSec ? Math.PI * 1.85 : Math.min(arcSpan, 0.45 * count + 0.5);
+      const span = isRootHub ? Math.PI * 1.85 : Math.min(arcSpan, 0.45 * count + 0.5);
 
       kws.forEach((kw, idx) => {
         const frac = count === 1 ? 0 : idx / (count - 1) - 0.5;
         const ang = outAng + frac * span;
-        const rJitter = orbitR + (idx % 2 === 0 ? 0 : 32);
+        const rJitter = orbitR + (idx % 2 === 0 ? 0 : 34);
         const yOff = yBase + ((idx % 3) - 1) * 34;
         const x = sx + Math.cos(ang) * rJitter;
         const z = sz + Math.sin(ang) * rJitter;
@@ -1194,22 +1024,22 @@ function initStudio(): void {
 
     nodes.forEach((n) => {
       if (n.type === 'kw') return;
-      placeKwRing(n, secHeadingKws.get(n.id) || [], 125, -24, 1.55);
-      placeKwRing(n, secSupportKws.get(n.id) || [], 185, 62, 1.95);
+      placeKwRing(n, hubInnerKws.get(n.id) || [], isClusters ? 115 : 125, -22, 1.65);
+      placeKwRing(n, hubOuterKws.get(n.id) || [], isClusters ? 175 : 185, 60, 2.0);
     });
 
-    sharedKws.forEach(({ kw, secs }, idx) => {
+    sharedKws.forEach(({ kw, hubs }, idx) => {
       let cx = 0;
       let cy = 0;
       let cz = 0;
-      secs.forEach((s) => {
+      hubs.forEach((s) => {
         cx += s.x || 0;
         cy += s.y || 0;
         cz += s.z || 0;
       });
-      cx /= secs.length;
-      cy /= secs.length;
-      cz /= secs.length;
+      cx /= hubs.length;
+      cy /= hubs.length;
+      cz /= hubs.length;
       const ang = Math.atan2(cz, cx) + ((idx % 5) - 2) * 0.22;
       const rLen = Math.hypot(cx, cz);
       const scale = rLen > 1 ? (rLen + 55) / rLen : 1;
@@ -1251,7 +1081,7 @@ function initStudio(): void {
             d2 = 1.5;
           }
           const minD =
-            a.type === 'section' && b.type === 'section'
+            a.type !== 'kw' && b.type !== 'kw'
               ? 165
               : a.type !== 'kw' || b.type !== 'kw'
                 ? 112
@@ -1282,7 +1112,14 @@ function initStudio(): void {
         const dy = t.y! - s.y!;
         const dz = t.z! - s.z!;
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-        const targetD = l.kind === 'tree' ? 210 : l.kind === 'heading' ? 125 : 175;
+        const targetD =
+          l.kind === 'tree'
+            ? t.type === 'kw'
+              ? 135
+              : 220
+            : l.kind === 'heading'
+              ? 125
+              : 175;
         const pull = ((d - targetD) / d) * 0.035 * decay;
         if (s.id !== rootNode.id) {
           s.vx! += dx * pull;
@@ -1303,7 +1140,7 @@ function initStudio(): void {
         }
         const anc = anchor.get(n.id);
         if (anc) {
-          const stiff = n.type === 'section' ? 0.14 : 0.065;
+          const stiff = n.type !== 'kw' ? 0.14 : 0.065;
           n.vx! += (anc.x - n.x!) * stiff;
           n.vy! += (anc.y - n.y!) * stiff;
           n.vz! += (anc.z - n.z!) * stiff;
@@ -1329,7 +1166,7 @@ function initStudio(): void {
       n.y! -= midY;
     });
     const floorY = maxY - midY + 45;
-    const h2RingY = (topSecs[0]?.y ?? -40) - 0;
+    const h2RingY = topHubs[0]?.y ?? -40;
 
     // World bounds & perspective framing
     const R =
@@ -1346,17 +1183,24 @@ function initStudio(): void {
     box.insertBefore(canvas, box.firstChild);
     const ctx = canvas.getContext('2d')!;
 
-    // 3D HUD: Section Jumper (top-left) & Camera Controls (bottom-right)
+    // 3D HUD: Quick Jumper (top-left) & Camera Controls (bottom-right)
     const hudTop = document.createElement('div');
     hudTop.className = 'hud-3d-top';
     const jumpSel = document.createElement('select');
     jumpSel.className = 'hud-3d-select';
-    jumpSel.setAttribute('aria-label', 'Jump to heading section');
-    const secNodes = nodes.filter((n) => n.type === 'root' || n.type === 'section');
+    jumpSel.setAttribute(
+      'aria-label',
+      isClusters ? 'Jump to topic cluster' : 'Jump to heading section'
+    );
+    const hubNodes = nodes.filter((n) => n.type !== 'kw');
     jumpSel.innerHTML =
-      `<option value="__overview__">Overview (All headings)</option>` +
-      secNodes
+      `<option value="__overview__">${isClusters ? 'Overview (All clusters)' : 'Overview (All headings)'}</option>` +
+      hubNodes
         .map((n) => {
+          if (isClusters) {
+            const tag = n.type === 'root' ? 'TOPIC' : n.other ? 'OTHER' : 'CLUSTER';
+            return `<option value="${esc(n.id)}">${tag} · ${esc(trunc(n.label, 34))}</option>`;
+          }
           const lvl = n.type === 'root' ? 1 : n.ref?.level || 2;
           const indent = '\u00A0'.repeat(Math.max(0, (lvl - 1) * 2));
           const tag = n.type === 'root' ? 'H1' : (n.ref?.tag || 'H2').toUpperCase();
@@ -1385,15 +1229,23 @@ function initStudio(): void {
     let hovered: GraphNode | null = null;
     let dirty = true;
 
-    const cRoot = css('--n-root');
-    const cSection = css('--n-section');
     const cCluster = css('--n-cluster');
     const cBlue = css('--accent-blue');
     const cAccent = css('--accent');
     const cLink = css('--link');
 
-    const colFor = (n: GraphNode) =>
-      n.type === 'root' ? cRoot : n.type === 'section' ? cSection : tierColor(n.ref?.tier || 'Long-tail');
+    const colFor = (n: GraphNode) => nodeColor(n);
+    const linkCol = (l: GraphLink, s: GraphNode, t: GraphNode): string => {
+      if (l.kind === 'cooc') return cCluster;
+      if (l.kind === 'heading') return cAccent;
+      if (l.kind === 'tree') {
+        if (isClusters) {
+          return s.id === rootNode.id ? cCluster : (t.ref?.relevance ?? 0) >= 55 ? cAccent : cBlue;
+        }
+        return cBlue;
+      }
+      return cLink;
+    };
 
     const getNeighbors = (id: string | null): Set<string> | null => {
       if (!id) return null;
@@ -1443,7 +1295,16 @@ function initStudio(): void {
     const floorRing = ringPts(R * 0.88, floorY);
 
     const visualRadius = (n: GraphNode, persp: number): number => {
-      const base = n.type === 'root' ? 16 : n.type === 'section' ? 11.5 : 4.5 + ((n.ref?.relevance || 20) / 100) * 6.5;
+      const base =
+        n.type === 'root'
+          ? 16
+          : n.type === 'cluster'
+            ? n.other
+              ? 8.5
+              : Math.max(10.5, Math.min(16.5, n.r * 0.72))
+            : n.type === 'section'
+              ? 11.5
+              : 4.5 + ((n.ref?.relevance || 20) / 100) * 6.5;
       const zoomBoost = Math.pow(cam3d.zoom, 0.42);
       return Math.max(3.5, Math.min(28, base * persp * zoomBoost));
     };
@@ -1498,12 +1359,12 @@ function initStudio(): void {
       drawRing(eqRing, 0.16, false);
       drawRing(floorRing, 0.09, true);
 
-      // Floor spokes under top-level sections
+      // Floor spokes under top-level hubs
       ctx.save();
       ctx.strokeStyle = toRgba(cBlue, 0.08);
       ctx.lineWidth = 1;
       const originP = projectPt(0, floorY, 0, cy, sy, cp, sp);
-      topSecs.forEach((s) => {
+      topHubs.forEach((s) => {
         const spP = projectPt(s.x!, floorY, s.z!, cy, sy, cp, sp);
         ctx.beginPath();
         ctx.moveTo(originP.px, originP.py);
@@ -1526,24 +1387,17 @@ function initStudio(): void {
         const depthFade = Math.max(0.28, 1 - 0.65 * Math.max(0, Math.min(1, (midZ + R) / (2 * R))));
         const isLit = !nb || (s.id === activeId || t.id === activeId);
         const alpha = isLit
-          ? (l.kind === 'support' ? 0.52 : l.kind === 'cooc' ? 0.55 : 0.85) * depthFade
+          ? (l.kind === 'support' ? 0.52 : l.kind === 'cooc' ? 0.55 : isClusters && s.id !== rootNode.id ? 0.64 : 0.85) * depthFade
           : 0.07;
 
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(s._px!, s._py!);
         ctx.lineTo(t._px!, t._py!);
-        const col =
-          l.kind === 'cooc'
-            ? cCluster
-            : l.kind === 'heading'
-              ? cAccent
-              : l.kind === 'tree'
-                ? cBlue
-                : cLink;
-        ctx.strokeStyle = toRgba(col, alpha);
+        ctx.strokeStyle = toRgba(linkCol(l, s, t), alpha);
         ctx.lineWidth = isLit
-          ? (l.kind === 'tree' ? 1.8 : l.kind === 'heading' ? 1.6 : 1.1) * Math.min(1.4, (s._ps! + t._ps!) / 2)
+          ? (l.kind === 'tree' ? (isClusters && t.type === 'kw' ? 1.3 : 1.8) : l.kind === 'heading' ? 1.6 : 1.1) *
+            Math.min(1.4, (s._ps! + t._ps!) / 2)
           : 0.9;
         if (l.kind === 'support') ctx.setLineDash([4, 4]);
         else if (l.kind === 'cooc') ctx.setLineDash([2, 4]);
@@ -1622,6 +1476,7 @@ function initStudio(): void {
           if (n.id === state.selected || n.id === hovered?.id) prio = 10000;
           else if (nb && nb.has(n.id)) prio = 5000 + (n.ref?.relevance || 0);
           else if (n.type === 'root') prio = 4000;
+          else if (n.type === 'cluster') prio = 3000 - (n.other ? 400 : 0) + (n.ref?.strength || 0) - n._pz! * 0.2;
           else if (n.type === 'section') prio = 3000 - (n.ref?.level || 2) * 100 - n._pz! * 0.2;
           else prio = (labelSet.has(n.id) ? 1000 : 200) + (n.ref?.relevance || 0) - n._pz! * 0.25;
           return { n, prio };
@@ -1645,11 +1500,17 @@ function initStudio(): void {
 
         const tagPrefix =
           n.type === 'root'
-            ? 'H1'
-            : n.type === 'section'
-              ? (n.ref?.tag || 'H2').toUpperCase()
-              : '';
-        const textStr = trunc(n.label, n.type === 'section' ? 28 : 24);
+            ? isClusters
+              ? 'TOPIC'
+              : 'H1'
+            : n.type === 'cluster'
+              ? n.other
+                ? 'OTHER'
+                : 'CLUSTER'
+              : n.type === 'section'
+                ? (n.ref?.tag || 'H2').toUpperCase()
+                : '';
+        const textStr = trunc(n.label, n.type === 'section' || n.type === 'cluster' ? 28 : 24);
         const textW = ctx.measureText(textStr).width;
         const tagW = tagPrefix ? ctx.measureText(tagPrefix).width + 10 : 0;
         const pillW = textW + tagW + 14;
@@ -1698,7 +1559,7 @@ function initStudio(): void {
           : toRgba(accentCol, (isHub ? 0.55 : 0.32) * labelAlpha);
         ctx.stroke();
 
-        // Optional H1/H2/H3 badge inside pill
+        // Optional TOPIC/CLUSTER/H1/H2/H3 badge inside pill
         let textStartX = pillX + 7;
         ctx.textBaseline = 'middle';
         if (tagPrefix) {
@@ -1978,7 +1839,7 @@ function initStudio(): void {
         .map((l) => {
           const s = l.source as GraphNode;
           const t = l.target as GraphNode;
-          const col = l.kind === 'cooc' ? cCluster : l.kind === 'heading' ? cAccent : l.kind === 'tree' ? cBlue : cLink;
+          const col = linkCol(l, s, t);
           return `<line x1="${s._px!.toFixed(1)}" y1="${s._py!.toFixed(1)}" x2="${t._px!.toFixed(1)}" y2="${t._py!.toFixed(1)}" stroke="${col}" stroke-opacity="0.65" stroke-width="1.3"${l.kind === 'support' ? ' stroke-dasharray="4 4"' : ''}/>`;
         })
         .join('');
@@ -1986,7 +1847,7 @@ function initStudio(): void {
       const circles = sorted
         .map((n) => {
           const r = visualRadius(n, n._ps!);
-          const showLbl = state.allLabels || n.type !== 'kw' || labelSet.has(n.id);
+          const showLbl = !n.dup && (state.allLabels || n.type !== 'kw' || labelSet.has(n.id));
           return `<g><circle cx="${n._px!.toFixed(1)}" cy="${n._py!.toFixed(1)}" r="${r.toFixed(1)}" fill="${colFor(n)}"/>${showLbl ? `<text x="${n._px!.toFixed(1)}" y="${(n._py! + r + 14).toFixed(1)}" text-anchor="middle" fill="#f0f6ff" font-size="11">${esc(trunc(n.label, 28))}</text>` : ''}</g>`;
         })
         .join('');
