@@ -1270,12 +1270,18 @@ function initStudio(): void {
     `;
     box.appendChild(hudCtrl);
 
-    // Camera state, inertia, & smooth fly-to target
+    // Camera state, inertia, & smooth time-based camera animations
     const camTarget = { ...cam3d };
     let velYaw = 0;
     let velPitch = 0;
     let autoOrbit = false;
-    let flying = false;
+    let camAnim: {
+      start: number;
+      duration: number;
+      ease: 'inOut' | 'out';
+      from: typeof CAM3D_DEFAULT;
+      to: typeof CAM3D_DEFAULT;
+    } | null = null;
     let hovered: GraphNode | null = null;
     let dirty = true;
 
@@ -1316,18 +1322,19 @@ function initStudio(): void {
       cy: number,
       sy: number,
       cp: number,
-      sp: number
+      sp: number,
+      cam = cam3d
     ) => {
-      const dx = x - cam3d.tx;
-      const dy = y - cam3d.ty;
-      const dz = z - cam3d.tz;
+      const dx = x - cam.tx;
+      const dy = y - cam.ty;
+      const dz = z - cam.tz;
       const x1 = dx * cy - dz * sy;
       const z1 = dx * sy + dz * cy;
       const y2 = dy * cp - z1 * sp;
       const z2 = dy * sp + z1 * cp;
       const denom = Math.max(focal * 0.22, focal + z2);
       const persp = focal / denom;
-      const s = persp * baseScale * cam3d.zoom;
+      const s = persp * baseScale * cam.zoom;
       return {
         px: W / 2 + x1 * s,
         py: H / 2 + y2 * s,
@@ -1641,24 +1648,130 @@ function initStudio(): void {
       return null;
     };
 
-    const flyTo = (n: GraphNode | null) => {
-      if (n) {
-        camTarget.tx = n.x!;
-        camTarget.ty = n.y!;
-        camTarget.tz = n.z!;
-        camTarget.zoom = Math.max(camTarget.zoom, 1.85);
-        // Rotate yaw slightly so node sits nicely toward viewer if on far side
-        const ang = Math.atan2(n.z!, n.x!);
-        if (n.id !== rootNode.id) {
-          camTarget.yaw = -ang - Math.PI / 2;
-        }
-      } else {
-        Object.assign(camTarget, CAM3D_DEFAULT);
+    const shortestDeltaYaw = (fromYaw: number, toYaw: number, screenBiasPx?: number) => {
+      let d = Math.atan2(Math.sin(toYaw - fromYaw), Math.cos(toYaw - fromYaw));
+      if (Math.abs(Math.abs(d) - Math.PI) < 0.08 && screenBiasPx != null) {
+        d = screenBiasPx < W / 2 ? Math.PI : -Math.PI;
       }
+      return d;
+    };
+
+    const animateTo = (
+      next: Partial<typeof CAM3D_DEFAULT>,
+      ease: 'inOut' | 'out' = 'inOut',
+      customDuration?: number,
+      screenBiasPx?: number
+    ) => {
+      const to = { ...cam3d, ...next };
+      if (next.yaw != null) {
+        to.yaw = cam3d.yaw + shortestDeltaYaw(cam3d.yaw, next.yaw, screenBiasPx);
+      }
+      to.pitch = Math.max(-1.38, Math.min(1.38, to.pitch));
+      to.zoom = Math.max(0.35, Math.min(6, to.zoom));
+      const angDist = Math.abs(to.yaw - cam3d.yaw) + Math.abs(to.pitch - cam3d.pitch);
+      const moveDist = Math.hypot(to.tx - cam3d.tx, to.ty - cam3d.ty, to.tz - cam3d.tz) / (R || 300);
+      const zoomDist = Math.abs(Math.log(to.zoom / (cam3d.zoom || 1)));
+      const duration =
+        customDuration ??
+        Math.round(Math.min(940, Math.max(400, 340 + angDist * 190 + moveDist * 180 + zoomDist * 150)));
+      Object.assign(camTarget, to);
       velYaw = 0;
       velPitch = 0;
-      flying = true;
+      camAnim = {
+        start: performance.now(),
+        duration,
+        ease,
+        from: { ...cam3d },
+        to,
+      };
       dirty = true;
+    };
+
+    // Bring a clicked back/off-angle node smoothly to the front of the 3D view
+    const bringToFront = (n: GraphNode) => {
+      const cy = Math.cos(cam3d.yaw);
+      const sy = Math.sin(cam3d.yaw);
+      const xView = n.x! * cy - n.z! * sy;
+      const zView = n.x! * sy + n.z! * cy;
+      const rHoriz = Math.hypot(n.x!, n.z!);
+      const frontAngle = Math.abs(Math.atan2(xView, -zView));
+      const inFrame =
+        n._px != null &&
+        n._py != null &&
+        n._px >= W * 0.12 &&
+        n._px <= W * 0.88 &&
+        n._py >= H * 0.12 &&
+        n._py <= H * 0.78;
+      const alreadyFront = rHoriz < 10 || (zView < 0 && frontAngle <= 0.62);
+
+      // Don't jerk the camera if the clicked node is already cleanly at the front
+      if (alreadyFront && inFrame) return;
+
+      const targetYaw = rHoriz > 8 ? -Math.atan2(n.z!, n.x!) - Math.PI / 2 : cam3d.yaw;
+      const idealPitch = Math.max(0.18, Math.min(0.56, 0.34 - (n.y! / (R || 300)) * 0.24));
+      const targetPitch = cam3d.pitch * 0.3 + idealPitch * 0.7;
+      const targetZoom = cam3d.zoom < 0.9 ? 1.05 : cam3d.zoom;
+
+      // Keep overall 3D constellation centered when orbiting, but pan just enough so node + pill label fit cleanly
+      const baseFocusW =
+        targetZoom <= 1.35 ? 0.22 : Math.min(0.88, 0.22 + (targetZoom - 1.35) * 0.38);
+      const candWeights = [baseFocusW, 0.55, 0.85, 1.0].filter((w, i, arr) => i === 0 || w > arr[i - 1]);
+      let chosen = { tx: n.x! * baseFocusW, ty: n.y! * baseFocusW, tz: n.z! * baseFocusW };
+
+      const tcy = Math.cos(targetYaw);
+      const tsy = Math.sin(targetYaw);
+      const tcp = Math.cos(targetPitch);
+      const tsp = Math.sin(targetPitch);
+      for (const fw of candWeights) {
+        const probeCam = {
+          yaw: targetYaw,
+          pitch: targetPitch,
+          zoom: targetZoom,
+          tx: n.x! * fw,
+          ty: n.y! * fw,
+          tz: n.z! * fw,
+        };
+        const p = projectPt(n.x!, n.y!, n.z!, tcy, tsy, tcp, tsp, probeCam);
+        chosen = { tx: probeCam.tx, ty: probeCam.ty, tz: probeCam.tz };
+        if (p.px >= W * 0.16 && p.px <= W * 0.84 && p.py >= H * 0.18 && p.py <= H * 0.74) {
+          break;
+        }
+      }
+
+      animateTo(
+        {
+          yaw: targetYaw,
+          pitch: targetPitch,
+          zoom: targetZoom,
+          tx: chosen.tx,
+          ty: chosen.ty,
+          tz: chosen.tz,
+        },
+        'inOut',
+        undefined,
+        n._px
+      );
+    };
+
+    const flyTo = (n: GraphNode | null) => {
+      if (n) {
+        const desiredYaw =
+          Math.hypot(n.x!, n.z!) > 8 ? -Math.atan2(n.z!, n.x!) - Math.PI / 2 : cam3d.yaw;
+        animateTo(
+          {
+            tx: n.x!,
+            ty: n.y!,
+            tz: n.z!,
+            zoom: Math.max(cam3d.zoom, 1.85),
+            yaw: desiredYaw,
+          },
+          'inOut',
+          undefined,
+          n._px
+        );
+      } else {
+        animateTo({ ...CAM3D_DEFAULT }, 'inOut');
+      }
     };
 
     // Shared camera-space to world-target displacement helper
@@ -1700,7 +1813,7 @@ function initStudio(): void {
       moved = 0;
       velYaw = 0;
       velPitch = 0;
-      flying = false;
+      camAnim = null;
       canvas.classList.toggle('is-panning', dragMode === 'pan');
       canvas.classList.toggle('is-dragging', dragMode === 'orbit');
     });
@@ -1763,6 +1876,9 @@ function initStudio(): void {
         const rect = canvas.getBoundingClientRect();
         const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
         select(hit);
+        if (hit) {
+          bringToFront(hit);
+        }
         if (hit && jumpSel) {
           jumpSel.value = hit.type === 'kw' ? '__overview__' : hit.id;
         }
@@ -1795,7 +1911,7 @@ function initStudio(): void {
       'wheel',
       (e: WheelEvent) => {
         e.preventDefault();
-        flying = false;
+        camAnim = null;
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
@@ -1852,6 +1968,9 @@ function initStudio(): void {
     if (!hovered) canvas.style.cursor = dragTool3d === 'pan' ? 'move' : 'grab';
 
     hudCtrl.querySelector('#hud3d-zin')?.addEventListener('click', () => {
+      const next: Partial<typeof CAM3D_DEFAULT> = {
+        zoom: Math.min(6, cam3d.zoom * 1.28),
+      };
       if (
         state.selected &&
         Math.abs(cam3d.tx) < 1 &&
@@ -1860,19 +1979,15 @@ function initStudio(): void {
       ) {
         const sel = byId.get(state.selected);
         if (sel && sel.id !== rootNode.id) {
-          camTarget.tx = sel.x!;
-          camTarget.ty = sel.y!;
-          camTarget.tz = sel.z!;
+          next.tx = sel.x!;
+          next.ty = sel.y!;
+          next.tz = sel.z!;
         }
       }
-      camTarget.zoom = Math.min(6, camTarget.zoom * 1.28);
-      flying = true;
-      dirty = true;
+      animateTo(next, 'out', 240);
     });
     hudCtrl.querySelector('#hud3d-zout')?.addEventListener('click', () => {
-      camTarget.zoom = Math.max(0.35, camTarget.zoom / 1.28);
-      flying = true;
-      dirty = true;
+      animateTo({ zoom: Math.max(0.35, cam3d.zoom / 1.28) }, 'out', 240);
     });
     hudCtrl.querySelector('#hud3d-reset')?.addEventListener('click', () => {
       jumpSel.value = '__overview__';
@@ -1903,25 +2018,27 @@ function initStudio(): void {
             velPitch *= 0.88;
             dirty = true;
           }
-          if (flying) {
-            const k = 0.16;
-            cam3d.yaw += (camTarget.yaw - cam3d.yaw) * k;
-            cam3d.pitch += (camTarget.pitch - cam3d.pitch) * k;
-            cam3d.zoom += (camTarget.zoom - cam3d.zoom) * k;
-            cam3d.tx += (camTarget.tx - cam3d.tx) * k;
-            cam3d.ty += (camTarget.ty - cam3d.ty) * k;
-            cam3d.tz += (camTarget.tz - cam3d.tz) * k;
+          if (camAnim) {
+            const raw = Math.min(1, (performance.now() - camAnim.start) / camAnim.duration);
+            const t =
+              camAnim.ease === 'inOut'
+                ? raw < 0.5
+                  ? 4 * raw * raw * raw
+                  : 1 - Math.pow(-2 * raw + 2, 3) / 2
+                : 1 - Math.pow(1 - raw, 3);
+            const { from, to } = camAnim;
+            cam3d.yaw = from.yaw + (to.yaw - from.yaw) * t;
+            cam3d.pitch = from.pitch + (to.pitch - from.pitch) * t;
+            cam3d.zoom = from.zoom + (to.zoom - from.zoom) * t;
+            cam3d.tx = from.tx + (to.tx - from.tx) * t;
+            cam3d.ty = from.ty + (to.ty - from.ty) * t;
+            cam3d.tz = from.tz + (to.tz - from.tz) * t;
+            Object.assign(camTarget, cam3d);
             dirty = true;
-            if (
-              Math.abs(camTarget.yaw - cam3d.yaw) < 0.002 &&
-              Math.abs(camTarget.pitch - cam3d.pitch) < 0.002 &&
-              Math.abs(camTarget.zoom - cam3d.zoom) < 0.005 &&
-              Math.abs(camTarget.tx - cam3d.tx) < 0.5 &&
-              Math.abs(camTarget.ty - cam3d.ty) < 0.5 &&
-              Math.abs(camTarget.tz - cam3d.tz) < 0.5
-            ) {
-              Object.assign(cam3d, camTarget);
-              flying = false;
+            if (raw >= 1) {
+              Object.assign(cam3d, to);
+              Object.assign(camTarget, to);
+              camAnim = null;
             }
           } else if (autoOrbit && !hovered) {
             cam3d.yaw += 0.0025;
