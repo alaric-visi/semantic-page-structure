@@ -117,9 +117,10 @@ function initStudio(): void {
     selected: string | null;
     zoom: d3.ZoomBehavior<SVGSVGElement, unknown> | null;
     _graph: {
-      node: d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>;
-      link: d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown>;
+      node?: d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>;
+      link?: d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown>;
       links: GraphLink[];
+      onHighlight?: () => void;
     } | null;
   } = {
     data: null,
@@ -727,7 +728,8 @@ function initStudio(): void {
   let sim: d3.Simulation<GraphNode, GraphLink> | null = null;
   let stop3d: (() => void) | null = null;
   let reset3d: (() => void) | null = null;
-  const CAM3D_DEFAULT = { yaw: -0.55, pitch: 0.32, zoom: 1 };
+  let export3dSvg: (() => string) | null = null;
+  const CAM3D_DEFAULT = { yaw: -0.42, pitch: 0.36, zoom: 1.15, tx: 0, ty: 0, tz: 0 };
   const cam3d = { ...CAM3D_DEFAULT };
 
   function nodeColor(n: { type: string; other?: boolean; ref?: any }): string {
@@ -755,14 +757,77 @@ function initStudio(): void {
       stop3d = null;
     }
     reset3d = null;
+    export3dSvg = null;
     const box = $('#graph');
     if (!box) return;
     // 3D is used only for the Network layout in Heading hierarchy mode
     const is3d = state.layout === 'network' && state.mode === 'structure';
     box.classList.toggle('is-3d', is3d);
-    d3.select(box).select('svg').remove();
+    box.querySelectorAll('svg, canvas.graph-3d-canvas, .hud-3d-top, .hud-3d-controls').forEach((el) => el.remove());
     const W = box.clientWidth || 720;
     const H = box.clientHeight || 520;
+
+    const mode = state.mode;
+    const legendEl = $('#legend');
+    if (legendEl) {
+      legendEl.innerHTML =
+        `<div><i style="background:${css('--n-root')}"></i>${mode === 'clusters' ? 'Main topic' : 'Page (H1)'}</div>` +
+        (mode === 'clusters'
+          ? `<div><i style="background:${css('--n-cluster')}"></i>Topic cluster</div>`
+          : `<div><i style="background:${css('--n-section')}"></i>Section heading</div>`) +
+        ['Primary', 'Secondary', 'Supporting', 'Long-tail']
+          .map(
+            (t) =>
+              `<div><i style="background:${tierColor(t)}"></i>${t} keyword</div>`
+          )
+          .join('') +
+        (mode === 'structure'
+          ? `<div style="margin-top:3px;color:var(--text-tertiary)">— in heading &nbsp;┄ supports copy</div>`
+          : '');
+    }
+    const hintEl = $('#hint');
+    if (hintEl) {
+      hintEl.textContent = is3d
+        ? 'Drag: orbit · Right/Shift-drag: pan · Scroll: zoom · Dbl-click: focus'
+        : state.layout === 'network'
+          ? 'Scroll to zoom · drag nodes · click for details'
+          : 'Click a branch node to collapse/expand';
+    }
+
+    if (is3d) {
+      state.zoom = null;
+      const { nodes, links } = buildStructureGraph();
+      if (!nodes.length) return;
+      if (state.cooc) {
+        const ids = new Set(nodes.map((n) => n.id));
+        state.data.cooccurrence.forEach((e) => {
+          if (ids.has('k:' + e.source) && ids.has('k:' + e.target)) {
+            links.push({
+              source: 'k:' + e.source,
+              target: 'k:' + e.target,
+              kind: 'cooc',
+              dist: 80,
+              w: e.weight,
+            });
+          }
+        });
+      }
+      const labelSet = new Set(
+        nodes
+          .filter((n) => n.type !== 'kw')
+          .map((n) => n.id)
+          .concat(
+            nodes
+              .filter((n) => n.type === 'kw')
+              .sort((a, b) => b.ref.relevance - a.ref.relevance)
+              .slice(0, 22)
+              .map((n) => n.id)
+          )
+      );
+      render3D(W, H, nodes, links, labelSet, box, graphPanel);
+      return;
+    }
+
     const svg = d3
       .select(box)
       .insert('svg', ':first-child')
@@ -786,45 +851,14 @@ function initStudio(): void {
     feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
     const g = svg.append('g');
-    if (is3d) {
-      state.zoom = null;
-    } else {
-      state.zoom = d3
-        .zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.15, 4])
-        .on('zoom', (e) => g.attr('transform', e.transform));
-      svg.call(state.zoom).on('dblclick.zoom', null);
-    }
+    state.zoom = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.15, 4])
+      .on('zoom', (e) => g.attr('transform', e.transform));
+    svg.call(state.zoom).on('dblclick.zoom', null);
     svg.on('click', (e) => {
       if (e.target === svg.node()) select(null);
     });
-
-    const mode = state.mode;
-    const legendEl = $('#legend');
-    if (legendEl) {
-      legendEl.innerHTML =
-        `<div><i style="background:${css('--n-root')}"></i>${mode === 'clusters' ? 'Main topic' : 'Page (H1)'}</div>` +
-        (mode === 'clusters'
-          ? `<div><i style="background:${css('--n-cluster')}"></i>Topic cluster</div>`
-          : `<div><i style="background:${css('--n-section')}"></i>Section heading</div>`) +
-        ['Primary', 'Secondary', 'Supporting', 'Long-tail']
-          .map(
-            (t) =>
-              `<div><i style="background:${tierColor(t)}"></i>${t} keyword</div>`
-          )
-          .join('') +
-        (mode === 'structure'
-          ? `<div style="margin-top:3px;color:var(--text-tertiary)">— in heading &nbsp;┄ supports copy</div>`
-          : '');
-    }
-    const hintEl = $('#hint');
-    if (hintEl) {
-      hintEl.textContent = is3d
-        ? '3D · drag to orbit · scroll to zoom · click for details'
-        : state.layout === 'network'
-          ? 'Scroll to zoom · drag nodes · click for details'
-          : 'Click a branch node to collapse/expand';
-    }
 
     if (state.layout === 'tree') {
       renderTree(svg, g, W, H);
@@ -862,11 +896,6 @@ function initStudio(): void {
             .map((n) => n.id)
         )
     );
-
-    if (is3d) {
-      render3D(svg, g, W, H, nodes, links, labelSet, box, graphPanel);
-      return;
-    }
 
     const link = g
       .append('g')
@@ -1009,10 +1038,8 @@ function initStudio(): void {
     }
   }
 
-  // ------------------------------------------------------------------ 3D Network (Heading hierarchy only)
+  // ------------------------------------------------------------------ 3D Network (Heading hierarchy only, High-DPI Canvas)
   function render3D(
-    svg: d3.Selection<SVGSVGElement, unknown, null, undefined>,
-    g: d3.Selection<SVGGElement, unknown, null, undefined>,
     W: number,
     H: number,
     nodes: GraphNode[],
@@ -1021,20 +1048,6 @@ function initStudio(): void {
     box: HTMLElement,
     graphPanel: HTMLElement
   ): void {
-    // Sphere shading overlay for a lit, three-dimensional look
-    const shade = svg
-      .select('defs')
-      .append('radialGradient')
-      .attr('id', 'ps-sphere-shade')
-      .attr('cx', '35%')
-      .attr('cy', '30%')
-      .attr('r', '72%');
-    shade.append('stop').attr('offset', '0%').attr('stop-color', '#fff').attr('stop-opacity', 0.7);
-    shade.append('stop').attr('offset', '32%').attr('stop-color', '#fff').attr('stop-opacity', 0.12);
-    shade.append('stop').attr('offset', '72%').attr('stop-color', '#000').attr('stop-opacity', 0);
-    shade.append('stop').attr('offset', '100%').attr('stop-color', '#000').attr('stop-opacity', 0.5);
-
-    // Resolve links to node objects
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const links: GraphLink[] = [];
     rawLinks.forEach((l) => {
@@ -1042,341 +1055,950 @@ function initStudio(): void {
       const t = byId.get(typeof l.target === 'object' ? l.target.id : l.target);
       if (s && t) links.push({ ...l, source: s, target: t });
     });
-    const degree = new Map<string, number>();
+
+    // Helper to convert hex/rgb CSS color to rgba(...)
+    const toRgba = (col: string, alpha: number): string => {
+      const a = Math.max(0, Math.min(1, alpha));
+      const c = col.trim();
+      if (c.startsWith('#')) {
+        let hex = c.slice(1);
+        if (hex.length === 3) hex = hex.split('').map((ch) => ch + ch).join('');
+        const num = parseInt(hex, 16);
+        if (!Number.isNaN(num)) {
+          return `rgba(${(num >> 16) & 255},${(num >> 8) & 255},${num & 255},${a.toFixed(3)})`;
+        }
+      }
+      const m = c.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+      if (m) return `rgba(${m[1]},${m[2]},${m[3]},${a.toFixed(3)})`;
+      return c;
+    };
+
+    // Build section tree from tree links so sections form a spacious 3D tiered constellation
+    const childSecs = new Map<string, GraphNode[]>();
+    const treeLinks = links.filter((l) => l.kind === 'tree');
+    treeLinks.forEach((l) => {
+      const pid = (l.source as GraphNode).id;
+      const cid = (l.target as GraphNode);
+      if (!childSecs.has(pid)) childSecs.set(pid, []);
+      childSecs.get(pid)!.push(cid);
+    });
+
+    const anchor = new Map<string, { x: number; y: number; z: number }>();
+    const rootNode = nodes[0];
+    rootNode.x = 0;
+    rootNode.y = -210;
+    rootNode.z = 0;
+    anchor.set(rootNode.id, { x: 0, y: -210, z: 0 });
+
+    const topSecs = childSecs.get(rootNode.id) || [];
+    const M = Math.max(1, topSecs.length);
+    const baseR1 = Math.max(270, M * 58);
+
+    const placeSubtree = (
+      sec: GraphNode,
+      ang: number,
+      span: number,
+      rad: number,
+      yPos: number
+    ) => {
+      const x = Math.cos(ang) * rad;
+      const z = Math.sin(ang) * rad;
+      sec.x = x;
+      sec.y = yPos;
+      sec.z = z;
+      anchor.set(sec.id, { x, y: yPos, z });
+
+      const kids = childSecs.get(sec.id) || [];
+      if (!kids.length) return;
+      const childSpan = Math.min(Math.PI * 0.72, span * 0.92);
+      kids.forEach((kid, idx) => {
+        const frac = kids.length === 1 ? 0 : idx / (kids.length - 1) - 0.5;
+        const cAng = ang + frac * childSpan;
+        const cRad = rad + 195 + (idx % 2 === 1 ? 35 : 0);
+        const cY = yPos + 130 + (idx % 2 === 0 ? -24 : 24);
+        placeSubtree(kid, cAng, childSpan / Math.max(1, kids.length), cRad, cY);
+      });
+    };
+
+    topSecs.forEach((sec, i) => {
+      const ang = (i / M) * Math.PI * 2 - Math.PI / 2;
+      const span = (Math.PI * 1.8) / M;
+      const yPos = -40 + (i % 2 === 0 ? -36 : 36);
+      placeSubtree(sec, ang, span, baseR1, yPos);
+    });
+
+    // Place keywords cleanly around their owning section(s), pushed outward from center
+    const kwLinks = new Map<string, { sec: GraphNode; kind: 'heading' | 'support' }[]>();
     links.forEach((l) => {
+      if (l.kind !== 'heading' && l.kind !== 'support') return;
       const s = l.source as GraphNode;
       const t = l.target as GraphNode;
-      degree.set(s.id, (degree.get(s.id) || 0) + 1);
-      degree.set(t.id, (degree.get(t.id) || 0) + 1);
+      const kw = t.type === 'kw' ? t : s.type === 'kw' ? s : null;
+      const sec = t.type === 'kw' ? s : t;
+      if (!kw || !sec) return;
+      if (!kwLinks.has(kw.id)) kwLinks.set(kw.id, []);
+      kwLinks.get(kw.id)!.push({ sec, kind: l.kind });
     });
 
-    // Deterministic initial placement on a Fibonacci sphere
-    const N = nodes.length;
-    const golden = Math.PI * (3 - Math.sqrt(5));
-    nodes.forEach((n, i) => {
-      if (n.type === 'root') {
-        n.x = n.y = n.z = 0;
+    const secHeadingKws = new Map<string, GraphNode[]>();
+    const secSupportKws = new Map<string, GraphNode[]>();
+    const sharedKws: { kw: GraphNode; secs: GraphNode[] }[] = [];
+
+    nodes.forEach((n) => {
+      if (n.type !== 'kw') return;
+      const owners = kwLinks.get(n.id) || [];
+      const uniqueSecs = Array.from(new Set(owners.map((o) => o.sec)));
+      const headingOwner = owners.find((o) => o.kind === 'heading')?.sec;
+
+      if (uniqueSecs.length > 1 && !headingOwner) {
+        sharedKws.push({ kw: n, secs: uniqueSecs });
       } else {
-        const yy = 1 - (2 * (i + 0.5)) / N;
-        const rr = Math.sqrt(Math.max(0, 1 - yy * yy));
-        const th = golden * i;
-        const rad = 140;
-        n.x = Math.cos(th) * rr * rad;
-        n.y = yy * rad;
-        n.z = Math.sin(th) * rr * rad;
+        const primary = headingOwner || uniqueSecs[0] || rootNode;
+        const isHead = owners.some((o) => o.sec === primary && o.kind === 'heading');
+        const bucket = isHead ? secHeadingKws : secSupportKws;
+        if (!bucket.has(primary.id)) bucket.set(primary.id, []);
+        bucket.get(primary.id)!.push(n);
       }
-      n.vx = n.vy = n.vz = 0;
     });
 
-    // Lightweight 3D force simulation (links, many-body, collide, centre)
-    const charge = (n: GraphNode) =>
-      n.type === 'root' ? -900 : n.type === 'kw' ? -110 : -380;
-    const ITER = 300;
-    let alpha = 1;
-    const alphaDecay = 1 - Math.pow(0.001, 1 / ITER);
-    for (let it = 0; it < ITER; it++) {
-      alpha += (0 - alpha) * alphaDecay;
-      for (const l of links) {
-        const s = l.source as GraphNode;
-        const t = l.target as GraphNode;
-        let dx = t.x! - s.x!;
-        let dy = t.y! - s.y!;
-        let dz = t.z! - s.z!;
-        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-6;
-        const strength = l.kind === 'cooc' ? 0.04 : 0.7;
-        const k = ((d - l.dist) / d) * alpha * strength;
-        dx *= k;
-        dy *= k;
-        dz *= k;
-        const ds = degree.get(s.id) || 1;
-        const dt = degree.get(t.id) || 1;
-        const b = ds / (ds + dt);
-        t.vx! -= dx * b;
-        t.vy! -= dy * b;
-        t.vz! -= dz * b;
-        s.vx! += dx * (1 - b);
-        s.vy! += dy * (1 - b);
-        s.vz! += dz * (1 - b);
+    const placeKwRing = (
+      sec: GraphNode,
+      kws: GraphNode[],
+      orbitR: number,
+      yBase: number,
+      arcSpan: number
+    ) => {
+      if (!kws.length) return;
+      const sx = sec.x || 0;
+      const sy = sec.y || 0;
+      const sz = sec.z || 0;
+      const isRootSec = sec.id === rootNode.id;
+      const outAng = isRootSec ? -Math.PI / 2 : Math.atan2(sz, sx);
+      const count = kws.length;
+      const span = isRootSec ? Math.PI * 1.85 : Math.min(arcSpan, 0.45 * count + 0.5);
+
+      kws.forEach((kw, idx) => {
+        const frac = count === 1 ? 0 : idx / (count - 1) - 0.5;
+        const ang = outAng + frac * span;
+        const rJitter = orbitR + (idx % 2 === 0 ? 0 : 32);
+        const yOff = yBase + ((idx % 3) - 1) * 34;
+        const x = sx + Math.cos(ang) * rJitter;
+        const z = sz + Math.sin(ang) * rJitter;
+        const y = sy + yOff;
+        kw.x = x;
+        kw.y = y;
+        kw.z = z;
+        anchor.set(kw.id, { x, y, z });
+      });
+    };
+
+    nodes.forEach((n) => {
+      if (n.type === 'kw') return;
+      placeKwRing(n, secHeadingKws.get(n.id) || [], 125, -24, 1.55);
+      placeKwRing(n, secSupportKws.get(n.id) || [], 185, 62, 1.95);
+    });
+
+    sharedKws.forEach(({ kw, secs }, idx) => {
+      let cx = 0;
+      let cy = 0;
+      let cz = 0;
+      secs.forEach((s) => {
+        cx += s.x || 0;
+        cy += s.y || 0;
+        cz += s.z || 0;
+      });
+      cx /= secs.length;
+      cy /= secs.length;
+      cz /= secs.length;
+      const ang = Math.atan2(cz, cx) + ((idx % 5) - 2) * 0.22;
+      const rLen = Math.hypot(cx, cz);
+      const scale = rLen > 1 ? (rLen + 55) / rLen : 1;
+      const x = cx * scale + Math.cos(ang) * 28;
+      const z = cz * scale + Math.sin(ang) * 28;
+      const y = cy + 68 + (idx % 3) * 30;
+      kw.x = x;
+      kw.y = y;
+      kw.z = z;
+      anchor.set(kw.id, { x, y, z });
+    });
+
+    // Gentle 3D anti-overlap relaxation preserving architectural hierarchy
+    const N = nodes.length;
+    nodes.forEach((n) => {
+      n.vx = n.vy = n.vz = 0;
+      if (n.x == null || n.y == null || n.z == null) {
+        n.x = 0;
+        n.y = 0;
+        n.z = 0;
       }
+    });
+
+    for (let it = 0; it < 130; it++) {
+      const decay = 1 - it / 135;
+      // Pairwise minimum-distance separation so nodes & labels never bunch up
       for (let i = 0; i < N; i++) {
         const a = nodes[i];
-        const ca = charge(a);
         for (let j = i + 1; j < N; j++) {
-          const c = nodes[j];
-          const dx = c.x! - a.x!;
-          const dy = c.y! - a.y!;
-          const dz = c.z! - a.z!;
-          const l2 = Math.max(dx * dx + dy * dy + dz * dz, 1);
-          const wa = (charge(c) * alpha) / l2;
-          const wc = (ca * alpha) / l2;
-          a.vx! += dx * wa;
-          a.vy! += dy * wa;
-          a.vz! += dz * wa;
-          c.vx! -= dx * wc;
-          c.vy! -= dy * wc;
-          c.vz! -= dz * wc;
-          const minD = a.r + c.r + 5;
-          if (l2 < minD * minD) {
-            const d = Math.sqrt(l2);
-            const push = ((minD - d) / d) * 0.25;
-            a.vx! -= dx * push;
-            a.vy! -= dy * push;
-            a.vz! -= dz * push;
-            c.vx! += dx * push;
-            c.vy! += dy * push;
-            c.vz! += dz * push;
+          const b = nodes[j];
+          let dx = b.x! - a.x!;
+          let dy = b.y! - a.y!;
+          let dz = b.z! - a.z!;
+          let d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < 0.01) {
+            dx = 1;
+            dy = 0.5;
+            dz = 0.5;
+            d2 = 1.5;
+          }
+          const minD =
+            a.type === 'section' && b.type === 'section'
+              ? 165
+              : a.type !== 'kw' || b.type !== 'kw'
+                ? 112
+                : 88;
+          if (d2 < minD * minD) {
+            const d = Math.sqrt(d2);
+            const push = ((minD - d) / d) * 0.32 * decay;
+            if (a.id !== rootNode.id) {
+              a.vx! -= dx * push;
+              a.vy! -= dy * push;
+              a.vz! -= dz * push;
+            }
+            if (b.id !== rootNode.id) {
+              b.vx! += dx * push;
+              b.vy! += dy * push;
+              b.vz! += dz * push;
+            }
           }
         }
       }
+
+      // Anchor spring + slight link spring
+      for (const l of links) {
+        if (l.kind === 'cooc') continue;
+        const s = l.source as GraphNode;
+        const t = l.target as GraphNode;
+        const dx = t.x! - s.x!;
+        const dy = t.y! - s.y!;
+        const dz = t.z! - s.z!;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        const targetD = l.kind === 'tree' ? 210 : l.kind === 'heading' ? 125 : 175;
+        const pull = ((d - targetD) / d) * 0.035 * decay;
+        if (s.id !== rootNode.id) {
+          s.vx! += dx * pull;
+          s.vy! += dy * pull;
+          s.vz! += dz * pull;
+        }
+        if (t.id !== rootNode.id) {
+          t.vx! -= dx * pull;
+          t.vy! -= dy * pull;
+          t.vz! -= dz * pull;
+        }
+      }
+
       for (const n of nodes) {
-        if (n.type === 'root') {
-          n.x = n.y = n.z = 0;
+        if (n.id === rootNode.id) {
           n.vx = n.vy = n.vz = 0;
           continue;
         }
-        n.vx! -= n.x! * 0.04 * alpha;
-        n.vy! -= n.y! * 0.04 * alpha;
-        n.vz! -= n.z! * 0.04 * alpha;
-        n.x! += n.vx! *= 0.6;
-        n.y! += n.vy! *= 0.6;
-        n.z! += n.vz! *= 0.6;
+        const anc = anchor.get(n.id);
+        if (anc) {
+          const stiff = n.type === 'section' ? 0.14 : 0.065;
+          n.vx! += (anc.x - n.x!) * stiff;
+          n.vy! += (anc.y - n.y!) * stiff;
+          n.vz! += (anc.z - n.z!) * stiff;
+        }
+        n.vx! *= 0.62;
+        n.vy! *= 0.62;
+        n.vz! *= 0.62;
+        n.x! += n.vx!;
+        n.y! += n.vy!;
+        n.z! += n.vz!;
       }
     }
 
-    // Camera / perspective
-    const R =
-      (d3.max(nodes, (n) => Math.sqrt(n.x! ** 2 + n.y! ** 2 + n.z! ** 2)) || 100) + 24;
-    const focal = R * 3;
-    const baseScale = (Math.min(W, H) / 2 - 46) / ((R * focal) / (focal - R));
-    const sizeK = Math.max(0.7, Math.min(1.35, baseScale));
+    // Center vertically around midpoint for natural orbiting
+    let minY = Infinity;
+    let maxY = -Infinity;
+    nodes.forEach((n) => {
+      if (n.y! < minY) minY = n.y!;
+      if (n.y! > maxY) maxY = n.y!;
+    });
+    const midY = (minY + maxY) / 2;
+    nodes.forEach((n) => {
+      n.y! -= midY;
+    });
+    const floorY = maxY - midY + 45;
+    const h2RingY = (topSecs[0]?.y ?? -40) - 0;
 
-    // Orbit guide rings (equator + floor)
+    // World bounds & perspective framing
+    const R =
+      (d3.max(nodes, (n) => Math.sqrt(n.x! ** 2 + n.y! ** 2 + n.z! ** 2)) || 260) + 60;
+    const focal = R * 2.8;
+    const baseScale = (Math.min(W, H) * 0.44) / R;
+
+    // Create High-DPI Canvas
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const canvas = document.createElement('canvas');
+    canvas.className = 'graph-3d-canvas';
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    box.insertBefore(canvas, box.firstChild);
+    const ctx = canvas.getContext('2d')!;
+
+    // 3D HUD: Section Jumper (top-left) & Camera Controls (bottom-right)
+    const hudTop = document.createElement('div');
+    hudTop.className = 'hud-3d-top';
+    const jumpSel = document.createElement('select');
+    jumpSel.className = 'hud-3d-select';
+    jumpSel.setAttribute('aria-label', 'Jump to heading section');
+    const secNodes = nodes.filter((n) => n.type === 'root' || n.type === 'section');
+    jumpSel.innerHTML =
+      `<option value="__overview__">Overview (All headings)</option>` +
+      secNodes
+        .map((n) => {
+          const lvl = n.type === 'root' ? 1 : n.ref?.level || 2;
+          const indent = '\u00A0'.repeat(Math.max(0, (lvl - 1) * 2));
+          const tag = n.type === 'root' ? 'H1' : (n.ref?.tag || 'H2').toUpperCase();
+          return `<option value="${esc(n.id)}">${indent}${tag} · ${esc(trunc(n.label, 34))}</option>`;
+        })
+        .join('');
+    hudTop.appendChild(jumpSel);
+    box.appendChild(hudTop);
+
+    const hudCtrl = document.createElement('div');
+    hudCtrl.className = 'hud-3d-controls';
+    hudCtrl.innerHTML = `
+      <button type="button" class="hud-3d-btn" id="hud3d-zin" title="Zoom in">+</button>
+      <button type="button" class="hud-3d-btn" id="hud3d-zout" title="Zoom out">&minus;</button>
+      <button type="button" class="hud-3d-btn" id="hud3d-reset" title="Reset 3D camera">Reset</button>
+      <button type="button" class="hud-3d-btn" id="hud3d-orbit" aria-pressed="false" title="Toggle gentle auto-rotation">Auto-orbit</button>
+    `;
+    box.appendChild(hudCtrl);
+
+    // Camera state, inertia, & smooth fly-to target
+    const camTarget = { ...cam3d };
+    let velYaw = 0;
+    let velPitch = 0;
+    let autoOrbit = false;
+    let flying = false;
+    let hovered: GraphNode | null = null;
+    let dirty = true;
+
+    const cRoot = css('--n-root');
+    const cSection = css('--n-section');
+    const cCluster = css('--n-cluster');
+    const cBlue = css('--accent-blue');
+    const cAccent = css('--accent');
+    const cLink = css('--link');
+
+    const colFor = (n: GraphNode) =>
+      n.type === 'root' ? cRoot : n.type === 'section' ? cSection : tierColor(n.ref?.tier || 'Long-tail');
+
+    const getNeighbors = (id: string | null): Set<string> | null => {
+      if (!id) return null;
+      const nb = new Set<string>([id]);
+      links.forEach((l) => {
+        const sid = (l.source as GraphNode).id;
+        const tid = (l.target as GraphNode).id;
+        if (sid === id) nb.add(tid);
+        if (tid === id) nb.add(sid);
+      });
+      return nb;
+    };
+
+    const projectPt = (
+      x: number,
+      y: number,
+      z: number,
+      cy: number,
+      sy: number,
+      cp: number,
+      sp: number
+    ) => {
+      const dx = x - cam3d.tx;
+      const dy = y - cam3d.ty;
+      const dz = z - cam3d.tz;
+      const x1 = dx * cy - dz * sy;
+      const z1 = dx * sy + dz * cy;
+      const y2 = dy * cp - z1 * sp;
+      const z2 = dy * sp + z1 * cp;
+      const denom = Math.max(focal * 0.22, focal + z2);
+      const persp = focal / denom;
+      const s = persp * baseScale * cam3d.zoom;
+      return {
+        px: W / 2 + x1 * s,
+        py: H / 2 + y2 * s,
+        pz: z2,
+        ps: persp,
+      };
+    };
+
     const ringPts = (radius: number, yPlane: number) =>
       d3.range(0, 65).map((i) => {
         const a = (i / 64) * Math.PI * 2;
         return [Math.cos(a) * radius, yPlane, Math.sin(a) * radius] as [number, number, number];
       });
-    const rings = [ringPts(R * 0.95, 0), ringPts(R * 0.7, R * 0.9)];
-    const ringSel = g
-      .append('g')
-      .attr('class', 'orbit-rings')
-      .selectAll<SVGPathElement, [number, number, number][]>('path')
-      .data(rings)
-      .join('path')
-      .attr('fill', 'none')
-      .attr('stroke', css('--accent'))
-      .attr('stroke-opacity', (_d, i) => (i === 0 ? 0.16 : 0.09))
-      .attr('stroke-dasharray', (_d, i) => (i === 0 ? null : '2 5'))
-      .attr('pointer-events', 'none');
+    const eqRing = ringPts(baseR1, h2RingY);
+    const floorRing = ringPts(R * 0.88, floorY);
 
-    const link = g
-      .append('g')
-      .selectAll<SVGLineElement, GraphLink>('line')
-      .data(links)
-      .join('line')
-      .attr('stroke', (l) =>
-        l.kind === 'cooc'
-          ? css('--n-cluster')
-          : l.kind === 'heading'
-            ? css('--link-strong')
-            : l.kind === 'tree'
-              ? css('--accent-blue')
-              : css('--link')
-      )
-      .attr('stroke-dasharray', (l) =>
-        l.kind === 'support' ? '3 3' : l.kind === 'cooc' ? '1 3' : null
-      );
+    const visualRadius = (n: GraphNode, persp: number): number => {
+      const base = n.type === 'root' ? 16 : n.type === 'section' ? 11.5 : 4.5 + ((n.ref?.relevance || 20) / 100) * 6.5;
+      const zoomBoost = Math.pow(cam3d.zoom, 0.42);
+      return Math.max(3.5, Math.min(28, base * persp * zoomBoost));
+    };
 
-    const node = g
-      .append('g')
-      .selectAll<SVGGElement, GraphNode>('g')
-      .data(nodes)
-      .join('g')
-      .attr(
-        'class',
-        (n) => `node ${n.type === 'root' ? 'root' : n.type !== 'kw' ? 'hub' : ''}`
-      )
-      .style('cursor', 'pointer');
+    const drawRoundRect = (
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      rad: number
+    ) => {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, rad);
+    };
 
-    node
-      .filter((n) => n.type !== 'kw')
-      .append('circle')
-      .attr('class', 'node-halo')
-      .attr('fill', (n) => nodeColor(n))
-      .attr('fill-opacity', (n) => (n.type === 'root' ? 0.22 : 0.15));
-    node
-      .append('circle')
-      .attr('class', 'node-core')
-      .attr('fill', (n) => nodeColor(n))
-      .attr('filter', (n) => (n.type !== 'kw' ? 'url(#ps-node-glow)' : null));
-    node
-      .append('circle')
-      .attr('class', 'node-shade')
-      .attr('fill', 'url(#ps-sphere-shade)')
-      .attr('pointer-events', 'none');
-    node
-      .append('text')
-      .attr('text-anchor', 'middle')
-      .text((n) => trunc(n.label, n.type === 'section' ? 34 : 30))
-      .attr('display', (n) =>
-        !n.dup && (state.allLabels || labelSet.has(n.id)) ? null : 'none'
-      );
-
-    let dragging = false;
-    let hovering = false;
-    let lastInteract = 0;
-
-    node
-      .on('mouseenter', (e, n) => {
-        hovering = true;
-        tip(e, n);
-      })
-      .on('mousemove', (e) => moveTip(e))
-      .on('mouseleave', () => {
-        hovering = false;
-        lastInteract = Date.now();
-        hideTip();
-      })
-      .on('click', (e, n) => {
-        e.stopPropagation();
-        select(n);
-      });
-
-    const project = () => {
+    const renderFrame = () => {
       const cy = Math.cos(cam3d.yaw);
       const sy = Math.sin(cam3d.yaw);
       const cp = Math.cos(cam3d.pitch);
       const sp = Math.sin(cam3d.pitch);
-      const proj = (x: number, y: number, z: number) => {
-        const x1 = x * cy - z * sy;
-        const z1 = x * sy + z * cy;
-        const y2 = y * cp - z1 * sp;
-        const z2 = y * sp + z1 * cp;
-        const persp = focal / (focal + z2);
-        const s = persp * baseScale * cam3d.zoom;
-        return { px: W / 2 + x1 * s, py: H / 2 + y2 * s, pz: z2, ps: persp * cam3d.zoom };
-      };
+
       nodes.forEach((n) => {
-        const p = proj(n.x!, n.y!, n.z!);
+        const p = projectPt(n.x!, n.y!, n.z!, cy, sy, cp, sp);
         n._px = p.px;
         n._py = p.py;
         n._pz = p.pz;
         n._ps = p.ps;
       });
-      return proj;
-    };
 
-    const fade = (z: number) => {
-      const t = Math.max(0, Math.min(1, (z + R) / (2 * R)));
-      return 1 - 0.62 * t;
-    };
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H);
 
-    const draw = () => {
-      const proj = project();
-      ringSel.attr('d', (pts) =>
-        pts
-          .map((p, i) => {
-            const q = proj(p[0], p[1], p[2]);
-            return `${i ? 'L' : 'M'}${q.px.toFixed(1)},${q.py.toFixed(1)}`;
-          })
-          .join('')
-      );
-      link
-        .attr('x1', (l) => (l.source as GraphNode)._px!)
-        .attr('y1', (l) => (l.source as GraphNode)._py!)
-        .attr('x2', (l) => (l.target as GraphNode)._px!)
-        .attr('y2', (l) => (l.target as GraphNode)._py!)
-        .attr('stroke-width', (l) => {
-          const s = ((l.source as GraphNode)._ps! + (l.target as GraphNode)._ps!) / 2;
-          const base =
-            l.kind === 'cooc'
-              ? Math.min(4, 0.6 + (l.w || 1) * 0.35)
-              : l.kind === 'heading'
-                ? 1.8
-                : l.kind === 'tree'
-                  ? 1.5
-                  : 1.1;
-          return base * s;
-        })
-        .attr('stroke-opacity', (l) => {
-          const z = ((l.source as GraphNode)._pz! + (l.target as GraphNode)._pz!) / 2;
-          return (l.kind === 'cooc' ? 0.55 : 0.9) * fade(z);
+      const activeId = hovered?.id || state.selected;
+      const nb = getNeighbors(activeId);
+
+      // 1. Subtle 3D orbital reference rings & spokes
+      const drawRing = (pts: [number, number, number][], alpha: number, dashed: boolean) => {
+        ctx.save();
+        ctx.beginPath();
+        pts.forEach((pt, idx) => {
+          const q = projectPt(pt[0], pt[1], pt[2], cy, sy, cp, sp);
+          if (idx === 0) ctx.moveTo(q.px, q.py);
+          else ctx.lineTo(q.px, q.py);
         });
+        ctx.strokeStyle = toRgba(cAccent, alpha);
+        ctx.lineWidth = 1;
+        if (dashed) ctx.setLineDash([4, 6]);
+        ctx.stroke();
+        ctx.restore();
+      };
+      drawRing(eqRing, 0.16, false);
+      drawRing(floorRing, 0.09, true);
 
-      node
-        .attr('transform', (n) => `translate(${n._px!.toFixed(1)},${n._py!.toFixed(1)})`)
-        .attr('opacity', (n) => fade(n._pz!));
-      node
-        .select<SVGCircleElement>('circle.node-halo')
-        .attr('r', (n) => (n.r + (n.type === 'root' ? 8 : 5)) * n._ps! * sizeK);
-      node
-        .select<SVGCircleElement>('circle.node-core')
-        .attr('r', (n) => n.r * n._ps! * sizeK);
-      node
-        .select<SVGCircleElement>('circle.node-shade')
-        .attr('r', (n) => n.r * n._ps! * sizeK);
-      node
-        .select<SVGTextElement>('text')
-        .attr('dy', (n) => n.r * n._ps! * sizeK + 12)
-        .style('font-size', (n) => {
-          const base = n.type === 'root' ? 13.5 : n.type !== 'kw' ? 12 : 11;
-          return `${(base * Math.max(0.75, Math.min(1.45, n._ps!))).toFixed(1)}px`;
-        });
-      // Painter's algorithm: far nodes first
-      node.sort((a, b) => b._pz! - a._pz!);
+      // Floor spokes under top-level sections
+      ctx.save();
+      ctx.strokeStyle = toRgba(cBlue, 0.08);
+      ctx.lineWidth = 1;
+      const originP = projectPt(0, floorY, 0, cy, sy, cp, sp);
+      topSecs.forEach((s) => {
+        const spP = projectPt(s.x!, floorY, s.z!, cy, sy, cp, sp);
+        ctx.beginPath();
+        ctx.moveTo(originP.px, originP.py);
+        ctx.lineTo(spP.px, spP.py);
+        ctx.stroke();
+      });
+      ctx.restore();
+
+      // 2. Links (sorted far-to-near by midpoint depth)
+      const sortedLinks = [...links].sort((a, b) => {
+        const za = ((a.source as GraphNode)._pz! + (a.target as GraphNode)._pz!) / 2;
+        const zb = ((b.source as GraphNode)._pz! + (b.target as GraphNode)._pz!) / 2;
+        return zb - za;
+      });
+
+      sortedLinks.forEach((l) => {
+        const s = l.source as GraphNode;
+        const t = l.target as GraphNode;
+        const midZ = (s._pz! + t._pz!) / 2;
+        const depthFade = Math.max(0.28, 1 - 0.65 * Math.max(0, Math.min(1, (midZ + R) / (2 * R))));
+        const isLit = !nb || (s.id === activeId || t.id === activeId);
+        const alpha = isLit
+          ? (l.kind === 'support' ? 0.52 : l.kind === 'cooc' ? 0.55 : 0.85) * depthFade
+          : 0.07;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(s._px!, s._py!);
+        ctx.lineTo(t._px!, t._py!);
+        const col =
+          l.kind === 'cooc'
+            ? cCluster
+            : l.kind === 'heading'
+              ? cAccent
+              : l.kind === 'tree'
+                ? cBlue
+                : cLink;
+        ctx.strokeStyle = toRgba(col, alpha);
+        ctx.lineWidth = isLit
+          ? (l.kind === 'tree' ? 1.8 : l.kind === 'heading' ? 1.6 : 1.1) * Math.min(1.4, (s._ps! + t._ps!) / 2)
+          : 0.9;
+        if (l.kind === 'support') ctx.setLineDash([4, 4]);
+        else if (l.kind === 'cooc') ctx.setLineDash([2, 4]);
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      // 3. Nodes (sorted back-to-front by pz)
+      const sortedNodes = [...nodes].sort((a, b) => b._pz! - a._pz!);
+      sortedNodes.forEach((n) => {
+        const px = n._px!;
+        const py = n._py!;
+        const sr = visualRadius(n, n._ps!);
+        if (px < -60 || px > W + 60 || py < -60 || py > H + 60) return;
+
+        const isSel = n.id === state.selected;
+        const isHov = n.id === hovered?.id;
+        const isLit = !nb || nb.has(n.id);
+        const depthT = Math.max(0, Math.min(1, (n._pz! + R) / (2 * R)));
+        const baseAlpha = isLit ? Math.max(0.4, 1 - 0.52 * depthT) : 0.14;
+        const baseCol = colFor(n);
+
+        // Soft aura only on hubs, selected, or hovered
+        if ((n.type !== 'kw' || isSel || isHov) && isLit) {
+          const auraR = sr * (isSel || isHov ? 2.15 : 1.75);
+          const aura = ctx.createRadialGradient(px, py, sr * 0.4, px, py, auraR);
+          aura.addColorStop(0, toRgba(baseCol, isSel || isHov ? 0.36 : 0.22));
+          aura.addColorStop(1, toRgba(baseCol, 0));
+          ctx.fillStyle = aura;
+          ctx.beginPath();
+          ctx.arc(px, py, auraR, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Crisp 3D sphere shading gradient
+        const grad = ctx.createRadialGradient(
+          px - sr * 0.32,
+          py - sr * 0.32,
+          sr * 0.1,
+          px,
+          py,
+          sr
+        );
+        grad.addColorStop(0, `rgba(255,255,255,${(0.9 * baseAlpha).toFixed(3)})`);
+        grad.addColorStop(0.32, toRgba(baseCol, baseAlpha));
+        grad.addColorStop(1, toRgba('#040814', Math.min(0.92, baseAlpha * 0.85)));
+
+        ctx.beginPath();
+        ctx.arc(px, py, sr, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Crisp rim ring
+        ctx.lineWidth = isSel || isHov ? 2.2 : n.type !== 'kw' ? 1.3 : 0.9;
+        ctx.strokeStyle =
+          isSel || isHov
+            ? '#ffffff'
+            : toRgba(baseCol, Math.min(1, baseAlpha * 0.9));
+        ctx.stroke();
+      });
+
+      // 4. Crisp Pill Labels with Screen-Space Collision Culling
+      const candidates = nodes
+        .filter((n) => {
+          if (n.dup) return false;
+          if (n._px! < -40 || n._px! > W + 40 || n._py! < -30 || n._py! > H + 30) return false;
+          if (state.allLabels) return true;
+          if (n.id === state.selected || n.id === hovered?.id) return true;
+          if (nb && nb.has(n.id)) return true;
+          if (n.type !== 'kw') return true;
+          // When zoomed in, reveal nearby keywords cleanly even beyond top 22
+          return labelSet.has(n.id) || cam3d.zoom >= 1.5;
+        })
+        .map((n) => {
+          let prio = 0;
+          if (n.id === state.selected || n.id === hovered?.id) prio = 10000;
+          else if (nb && nb.has(n.id)) prio = 5000 + (n.ref?.relevance || 0);
+          else if (n.type === 'root') prio = 4000;
+          else if (n.type === 'section') prio = 3000 - (n.ref?.level || 2) * 100 - n._pz! * 0.2;
+          else prio = (labelSet.has(n.id) ? 1000 : 200) + (n.ref?.relevance || 0) - n._pz! * 0.25;
+          return { n, prio };
+        })
+        .sort((a, b) => b.prio - a.prio);
+
+      const placedBoxes: Array<[number, number, number, number]> = [];
+      const padMargin = 5;
+
+      candidates.forEach(({ n }) => {
+        const isSelOrHov = n.id === state.selected || n.id === hovered?.id;
+        const isLit = !nb || nb.has(n.id);
+        if (!isLit && !state.allLabels) return;
+
+        const px = n._px!;
+        const py = n._py!;
+        const sr = visualRadius(n, n._ps!);
+        const isHub = n.type !== 'kw';
+        const fontSize = isSelOrHov ? 12.5 : n.type === 'root' ? 13 : isHub ? 11.5 : 10.5;
+        ctx.font = `${isHub || isSelOrHov ? '600' : '500'} ${fontSize}px Inter, -apple-system, sans-serif`;
+
+        const tagPrefix =
+          n.type === 'root'
+            ? 'H1'
+            : n.type === 'section'
+              ? (n.ref?.tag || 'H2').toUpperCase()
+              : '';
+        const textStr = trunc(n.label, n.type === 'section' ? 28 : 24);
+        const textW = ctx.measureText(textStr).width;
+        const tagW = tagPrefix ? ctx.measureText(tagPrefix).width + 10 : 0;
+        const pillW = textW + tagW + 14;
+        const pillH = fontSize + 8;
+
+        const pillX = Math.max(6, Math.min(W - pillW - 6, px - pillW / 2));
+        const pillY = py + sr + 6;
+        if (pillY + pillH > H - 6) return;
+
+        // Screen-space collision culling (skip overlapping lower-priority labels unless All labels is on)
+        if (!state.allLabels && !isSelOrHov) {
+          const x1 = pillX - padMargin;
+          const y1 = pillY - padMargin;
+          const x2 = pillX + pillW + padMargin;
+          const y2 = pillY + pillH + padMargin;
+          for (const [bx1, by1, bx2, by2] of placedBoxes) {
+            if (x1 < bx2 && x2 > bx1 && y1 < by2 && y2 > by1) {
+              return;
+            }
+          }
+          placedBoxes.push([x1, y1, x2, y2]);
+        }
+
+        const depthT = Math.max(0, Math.min(1, (n._pz! + R) / (2 * R)));
+        const labelAlpha = isSelOrHov ? 1 : Math.max(0.55, 1 - 0.35 * depthT);
+        const accentCol = colFor(n);
+
+        // Short vertical stem connecting sphere to pill
+        ctx.save();
+        ctx.strokeStyle = toRgba(accentCol, 0.45 * labelAlpha);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px, py + sr + 1);
+        ctx.lineTo(px, pillY);
+        ctx.stroke();
+
+        // Pill background
+        drawRoundRect(pillX, pillY, pillW, pillH, 5);
+        ctx.fillStyle = isSelOrHov
+          ? `rgba(10, 26, 56, ${(0.96 * labelAlpha).toFixed(3)})`
+          : `rgba(6, 11, 26, ${(0.86 * labelAlpha).toFixed(3)})`;
+        ctx.fill();
+        ctx.lineWidth = isSelOrHov ? 1.4 : 1;
+        ctx.strokeStyle = isSelOrHov
+          ? '#ffffff'
+          : toRgba(accentCol, (isHub ? 0.55 : 0.32) * labelAlpha);
+        ctx.stroke();
+
+        // Optional H1/H2/H3 badge inside pill
+        let textStartX = pillX + 7;
+        ctx.textBaseline = 'middle';
+        if (tagPrefix) {
+          ctx.fillStyle = toRgba(accentCol, labelAlpha);
+          ctx.font = `700 ${Math.max(9.5, fontSize - 1.5)}px "DM Mono", monospace`;
+          ctx.fillText(tagPrefix, textStartX, pillY + pillH / 2 + 0.5);
+          textStartX += tagW;
+          ctx.font = `600 ${fontSize}px Inter, -apple-system, sans-serif`;
+        }
+
+        // Main label text
+        ctx.fillStyle = `rgba(240, 246, 255, ${labelAlpha.toFixed(3)})`;
+        ctx.fillText(textStr, textStartX, pillY + pillH / 2 + 0.5);
+        ctx.restore();
+      });
+
+      ctx.restore();
     };
 
-    // Orbit (drag background) and zoom (wheel)
-    svg.call(
-      d3
-        .drag<SVGSVGElement, unknown>()
-        .filter((e) => !e.ctrlKey && !e.button && !(e.target as Element).closest('.node'))
-        .on('start', () => {
-          dragging = true;
-          svg.style('cursor', 'grabbing');
-        })
-        .on('drag', (e) => {
-          cam3d.yaw += e.dx * 0.008;
-          cam3d.pitch = Math.max(-1.45, Math.min(1.45, cam3d.pitch + e.dy * 0.008));
-          draw();
-        })
-        .on('end', () => {
-          dragging = false;
-          lastInteract = Date.now();
-          svg.style('cursor', null);
-        })
-    );
-    svg.on(
-      'wheel.orbit',
-      (e: WheelEvent) => {
-        e.preventDefault();
-        cam3d.zoom = Math.max(0.3, Math.min(4, cam3d.zoom * Math.exp(-e.deltaY * 0.0015)));
-        lastInteract = Date.now();
-        draw();
-      },
-      { passive: false } as any
-    );
+    const hitTest = (mx: number, my: number): GraphNode | null => {
+      // Search front-to-back (lowest pz first)
+      const frontFirst = [...nodes].sort((a, b) => a._pz! - b._pz!);
+      for (const n of frontFirst) {
+        const sr = visualRadius(n, n._ps!) + 6;
+        const dx = mx - n._px!;
+        const dy = my - n._py!;
+        if (dx * dx + dy * dy <= sr * sr) return n;
+      }
+      return null;
+    };
 
-    draw();
+    const flyTo = (n: GraphNode | null) => {
+      if (n) {
+        camTarget.tx = n.x!;
+        camTarget.ty = n.y!;
+        camTarget.tz = n.z!;
+        camTarget.zoom = Math.max(camTarget.zoom, 1.85);
+        // Rotate yaw slightly so node sits nicely toward viewer if on far side
+        const ang = Math.atan2(n.z!, n.x!);
+        if (n.id !== rootNode.id) {
+          camTarget.yaw = -ang - Math.PI / 2;
+        }
+      } else {
+        Object.assign(camTarget, CAM3D_DEFAULT);
+      }
+      velYaw = 0;
+      velPitch = 0;
+      flying = true;
+      dirty = true;
+    };
 
-    // Gentle auto-rotation, paused while the user is interacting
-    const timer = d3.timer(() => {
-      if (!box.isConnected || !graphPanel.classList.contains('on')) return;
-      if (dragging || hovering || Date.now() - lastInteract < 2500) return;
-      cam3d.yaw += 0.0022;
-      draw();
+    // Pointer Interaction (1:1 immediate drag anywhere, inertia on release, Shift/Right-drag pan)
+    let dragMode: 'orbit' | 'pan' | null = null;
+    let lastX = 0;
+    let lastY = 0;
+    let moved = 0;
+
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+      canvas.setPointerCapture(e.pointerId);
+      dragMode = e.button === 2 || e.button === 1 || e.shiftKey ? 'pan' : 'orbit';
+      lastX = e.clientX;
+      lastY = e.clientY;
+      moved = 0;
+      velYaw = 0;
+      velPitch = 0;
+      flying = false;
+      canvas.classList.toggle('is-panning', dragMode === 'pan');
+      canvas.classList.toggle('is-dragging', dragMode === 'orbit');
     });
 
-    stop3d = () => timer.stop();
-    reset3d = () => {
-      cam3d.yaw = CAM3D_DEFAULT.yaw;
-      cam3d.pitch = CAM3D_DEFAULT.pitch;
-      cam3d.zoom = CAM3D_DEFAULT.zoom;
-      lastInteract = Date.now();
-      draw();
+    canvas.addEventListener('pointermove', (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      if (dragMode) {
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        moved += Math.hypot(dx, dy);
+
+        if (dragMode === 'orbit') {
+          const dYaw = dx * 0.0075;
+          const dPitch = dy * 0.0075;
+          cam3d.yaw += dYaw;
+          cam3d.pitch = Math.max(-1.38, Math.min(1.38, cam3d.pitch + dPitch));
+          camTarget.yaw = cam3d.yaw;
+          camTarget.pitch = cam3d.pitch;
+          velYaw = dYaw * 0.85;
+          velPitch = dPitch * 0.85;
+        } else {
+          // Orthonormal screen-plane pan in world coordinates
+          const cy = Math.cos(cam3d.yaw);
+          const sy = Math.sin(cam3d.yaw);
+          const cp = Math.cos(cam3d.pitch);
+          const sp = Math.sin(cam3d.pitch);
+          const scale = 1 / (baseScale * cam3d.zoom);
+          const ux = dx * scale;
+          const uy = dy * scale;
+          cam3d.tx -= ux * cy - uy * sy * sp;
+          cam3d.ty -= uy * cp;
+          cam3d.tz += ux * sy + uy * cy * sp;
+          camTarget.tx = cam3d.tx;
+          camTarget.ty = cam3d.ty;
+          camTarget.tz = cam3d.tz;
+        }
+        hideTip();
+        dirty = true;
+        return;
+      }
+
+      const hit = hitTest(mx, my);
+      if (hit !== hovered) {
+        hovered = hit;
+        canvas.style.cursor = hit ? 'pointer' : 'grab';
+        dirty = true;
+      }
+      if (hit) {
+        tip(e, hit);
+      } else {
+        hideTip();
+      }
+    });
+
+    const endDrag = (e: PointerEvent) => {
+      if (!dragMode) return;
+      if (canvas.hasPointerCapture(e.pointerId)) {
+        canvas.releasePointerCapture(e.pointerId);
+      }
+      const wasClick = moved < 5 && e.button === 0;
+      dragMode = null;
+      canvas.classList.remove('is-dragging', 'is-panning');
+      if (wasClick) {
+        velYaw = 0;
+        velPitch = 0;
+        const rect = canvas.getBoundingClientRect();
+        const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+        select(hit);
+        if (hit && jumpSel) {
+          jumpSel.value = hit.type === 'kw' ? '__overview__' : hit.id;
+        }
+        dirty = true;
+      }
     };
 
-    state._graph = { node, link, links };
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+    canvas.addEventListener('mouseleave', () => {
+      if (!dragMode && hovered) {
+        hovered = null;
+        dirty = true;
+      }
+      hideTip();
+    });
+
+    canvas.addEventListener('dblclick', (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+      select(hit);
+      flyTo(hit);
+      if (jumpSel) {
+        jumpSel.value = hit && hit.type !== 'kw' ? hit.id : '__overview__';
+      }
+    });
+
+    canvas.addEventListener(
+      'wheel',
+      (e: WheelEvent) => {
+        e.preventDefault();
+        flying = false;
+        const factor = Math.exp(-e.deltaY * 0.0018);
+        camTarget.zoom = Math.max(0.35, Math.min(6, camTarget.zoom * factor));
+        cam3d.zoom = camTarget.zoom;
+        dirty = true;
+      },
+      { passive: false }
+    );
+
+    // HUD buttons
+    jumpSel.addEventListener('change', () => {
+      const val = jumpSel.value;
+      if (val === '__overview__') {
+        select(null);
+        flyTo(null);
+        return;
+      }
+      const target = byId.get(val) || null;
+      select(target);
+      flyTo(target);
+    });
+
+    hudCtrl.querySelector('#hud3d-zin')?.addEventListener('click', () => {
+      camTarget.zoom = Math.min(6, camTarget.zoom * 1.28);
+      flying = true;
+      dirty = true;
+    });
+    hudCtrl.querySelector('#hud3d-zout')?.addEventListener('click', () => {
+      camTarget.zoom = Math.max(0.35, camTarget.zoom / 1.28);
+      flying = true;
+      dirty = true;
+    });
+    hudCtrl.querySelector('#hud3d-reset')?.addEventListener('click', () => {
+      jumpSel.value = '__overview__';
+      select(null);
+      flyTo(null);
+    });
+    const orbitBtn = hudCtrl.querySelector<HTMLButtonElement>('#hud3d-orbit');
+    orbitBtn?.addEventListener('click', () => {
+      autoOrbit = !autoOrbit;
+      orbitBtn.classList.toggle('on', autoOrbit);
+      orbitBtn.setAttribute('aria-pressed', String(autoOrbit));
+      dirty = true;
+    });
+
+    // High-FPS animation loop (idle at 0% CPU when nothing moves)
+    let rafId = 0;
+    const tick = () => {
+      if (!box.isConnected) return;
+      const visible = graphPanel.classList.contains('on');
+      if (visible) {
+        if (!dragMode) {
+          if (Math.abs(velYaw) > 0.0001 || Math.abs(velPitch) > 0.0001) {
+            cam3d.yaw += velYaw;
+            cam3d.pitch = Math.max(-1.38, Math.min(1.38, cam3d.pitch + velPitch));
+            camTarget.yaw = cam3d.yaw;
+            camTarget.pitch = cam3d.pitch;
+            velYaw *= 0.88;
+            velPitch *= 0.88;
+            dirty = true;
+          }
+          if (flying) {
+            const k = 0.16;
+            cam3d.yaw += (camTarget.yaw - cam3d.yaw) * k;
+            cam3d.pitch += (camTarget.pitch - cam3d.pitch) * k;
+            cam3d.zoom += (camTarget.zoom - cam3d.zoom) * k;
+            cam3d.tx += (camTarget.tx - cam3d.tx) * k;
+            cam3d.ty += (camTarget.ty - cam3d.ty) * k;
+            cam3d.tz += (camTarget.tz - cam3d.tz) * k;
+            dirty = true;
+            if (
+              Math.abs(camTarget.yaw - cam3d.yaw) < 0.002 &&
+              Math.abs(camTarget.pitch - cam3d.pitch) < 0.002 &&
+              Math.abs(camTarget.zoom - cam3d.zoom) < 0.005 &&
+              Math.abs(camTarget.tx - cam3d.tx) < 0.5 &&
+              Math.abs(camTarget.ty - cam3d.ty) < 0.5 &&
+              Math.abs(camTarget.tz - cam3d.tz) < 0.5
+            ) {
+              Object.assign(cam3d, camTarget);
+              flying = false;
+            }
+          } else if (autoOrbit && !hovered) {
+            cam3d.yaw += 0.0025;
+            camTarget.yaw = cam3d.yaw;
+            dirty = true;
+          }
+        }
+        if (dirty) {
+          dirty = false;
+          renderFrame();
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    renderFrame();
+    rafId = requestAnimationFrame(tick);
+
+    stop3d = () => cancelAnimationFrame(rafId);
+    reset3d = () => {
+      jumpSel.value = '__overview__';
+      flyTo(null);
+    };
+    export3dSvg = () => {
+      const lines = links
+        .map((l) => {
+          const s = l.source as GraphNode;
+          const t = l.target as GraphNode;
+          const col = l.kind === 'cooc' ? cCluster : l.kind === 'heading' ? cAccent : l.kind === 'tree' ? cBlue : cLink;
+          return `<line x1="${s._px!.toFixed(1)}" y1="${s._py!.toFixed(1)}" x2="${t._px!.toFixed(1)}" y2="${t._py!.toFixed(1)}" stroke="${col}" stroke-opacity="0.65" stroke-width="1.3"${l.kind === 'support' ? ' stroke-dasharray="4 4"' : ''}/>`;
+        })
+        .join('');
+      const sorted = [...nodes].sort((a, b) => b._pz! - a._pz!);
+      const circles = sorted
+        .map((n) => {
+          const r = visualRadius(n, n._ps!);
+          const showLbl = state.allLabels || n.type !== 'kw' || labelSet.has(n.id);
+          return `<g><circle cx="${n._px!.toFixed(1)}" cy="${n._py!.toFixed(1)}" r="${r.toFixed(1)}" fill="${colFor(n)}"/>${showLbl ? `<text x="${n._px!.toFixed(1)}" y="${(n._py! + r + 14).toFixed(1)}" text-anchor="middle" fill="#f0f6ff" font-size="11">${esc(trunc(n.label, 28))}</text>` : ''}</g>`;
+        })
+        .join('');
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="background:${css('--bg-base')};font-family:Inter,sans-serif">${lines}${circles}</svg>`;
+    };
+
+    state._graph = {
+      links,
+      onHighlight: () => {
+        dirty = true;
+      },
+    };
     if (state.selected) {
       const n = nodes.find((x) => x.id === state.selected);
       if (n) highlight(n);
@@ -1564,6 +2186,14 @@ function initStudio(): void {
   });
 
   $('#svgDl')?.addEventListener('click', () => {
+    if (export3dSvg) {
+      download(
+        export3dSvg(),
+        `${slug()}-page-structure.svg`,
+        'image/svg+xml'
+      );
+      return;
+    }
     const svgEl = $<SVGSVGElement>('#graph svg');
     if (!svgEl) return;
     const clone = svgEl.cloneNode(true) as SVGSVGElement;
@@ -1588,8 +2218,9 @@ function initStudio(): void {
   function select(n: GraphNode | null): void {
     state.selected = n ? n.id : null;
     if (!n) {
-      state._graph?.node.classed('faded', false);
-      state._graph?.link.classed('faded', false);
+      state._graph?.node?.classed('faded', false);
+      state._graph?.link?.classed('faded', false);
+      state._graph?.onHighlight?.();
       renderDetail(null);
       return;
     }
@@ -1599,7 +2230,11 @@ function initStudio(): void {
 
   function highlight(n: GraphNode): void {
     if (!state._graph) return;
+    if (state._graph.onHighlight) {
+      state._graph.onHighlight();
+    }
     const { node, link, links } = state._graph;
+    if (!node || !link) return;
     const nb = new Set([n.id]);
     links.forEach((l) => {
       const sid = typeof l.source === 'object' ? l.source.id : l.source;

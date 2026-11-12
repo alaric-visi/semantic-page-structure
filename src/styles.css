@@ -1286,9 +1286,96 @@ body {
   background-size: 100% 100%, 100% 100%, 22px 22px;
 }
 
-#page-structure-studio #graph.is-3d .node circle.node-core {
-  stroke: rgba(255, 255, 255, 0.3);
-  stroke-width: 0.8px;
+#page-structure-studio .graph-3d-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+#page-structure-studio .graph-3d-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+#page-structure-studio .graph-3d-canvas.is-panning {
+  cursor: move;
+}
+
+#page-structure-studio .hud-3d-top {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 6;
+  max-width: calc(100% - 340px);
+}
+
+#page-structure-studio .hud-3d-select {
+  background: rgba(8, 14, 32, 0.88);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 999px;
+  color: #e2eeff;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 12px;
+  max-width: 240px;
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+#page-structure-studio .hud-3d-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.2);
+}
+
+#page-structure-studio .hud-3d-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  z-index: 6;
+  background: rgba(8, 14, 32, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 4px 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+#page-structure-studio .hud-3d-btn {
+  background: rgba(16, 26, 56, 0.75);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  color: #dbeafe;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+}
+
+#page-structure-studio .hud-3d-btn:hover {
+  background: rgba(0, 229, 255, 0.18);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+#page-structure-studio .hud-3d-btn.on {
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.24), rgba(59, 130, 246, 0.28));
+  border-color: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
 }
 
 #page-structure-studio .legend {
