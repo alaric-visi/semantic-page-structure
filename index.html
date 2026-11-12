@@ -86,6 +86,13 @@
 
       <!-- Header Right -->
       <div class="header-right">
+        <button type="button" class="btn btn-sm btn-api-keys" id="btn-api-keys" aria-label="API Keys & Integrations" title="Manage API Keys (Bing, etc.)">
+          <svg class="icon-sm text-emerald" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+          </svg>
+          <span class="btn-text-wide">API Keys</span>
+          <span class="key-status-dot" id="header-key-dot" title="No keys configured"></span>
+        </button>
         <button type="button" class="btn btn-sm" id="btn-about" aria-label="About Semantic Page Structure" aria-haspopup="dialog" title="About Semantic Page Structure">
           <svg class="icon-sm text-emerald" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
@@ -367,6 +374,13 @@
                 </select>
                 <span class="muted mono small" id="count"></span>
                 <span class="spacer"></span>
+                <button type="button" class="btn btn-xs btn-bing-action" id="btnFetchBingVol" title="Fetch real keyword search volume from Bing API">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                  <span>Fetch Bing Volume</span>
+                </button>
+                <span class="bing-vol-status-pill" id="bingVolStatus" hidden></span>
                 <button type="button" class="btn btn-xs" id="csvKw">Download keywords CSV</button>
                 <button type="button" class="btn btn-xs" id="csvSec">Download sections CSV</button>
               </div>
@@ -404,6 +418,267 @@
           <span class="footer-privacy">Exports: SVG &middot; CSV &middot; TXT &middot; Markdown &middot; PDF</span>
         </footer>
       </section>
+    </main>
+
+    <!-- Dedicated API Keys & Integrations Page -->
+    <main class="page-api-keys" id="page-api-keys" hidden>
+      <div class="api-keys-container">
+        <!-- Top breadcrumb / navigation bar -->
+        <div class="api-keys-topbar">
+          <button type="button" class="btn btn-sm" id="btn-back-to-studio">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+            <span>Back to Studio</span>
+          </button>
+          <div class="api-keys-breadcrumbs">
+            <span class="muted">Studio</span>
+            <span class="sep">/</span>
+            <span class="active">API Keys &amp; Integrations</span>
+          </div>
+          <span class="badge-privacy-pill">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <span>Stored 100% in Browser (LocalStorage)</span>
+          </span>
+        </div>
+
+        <!-- Page Hero -->
+        <header class="api-keys-hero">
+          <div class="api-keys-hero-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            </svg>
+            <span>Frontend Key Management</span>
+          </div>
+          <h1 class="api-keys-title">API Keys &amp; External Integrations</h1>
+          <p class="api-keys-lead">
+            Connect live search engine APIs to replace synthetic relevance estimates with real keyword search volume and web index document data.
+            Your API credentials stay safely in your browser and are never saved to our server or repository secrets.
+          </p>
+        </header>
+
+        <!-- Privacy Callout Alert -->
+        <div class="api-keys-notice">
+          <div class="notice-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <div class="notice-body">
+            <strong>Zero Secrets in Code or Cloud:</strong>
+            All API keys entered here remain isolated in your browser's private local storage. Every team member or client can supply their own personal API key without shared server credentials.
+          </div>
+        </div>
+
+        <!-- Provider Cards Grid -->
+        <div class="api-keys-grid">
+          <!-- CARD 1: MICROSOFT BING API (ACTIVE) -->
+          <article class="api-card api-card-active" id="card-bing-api">
+            <div class="api-card-header">
+              <div class="api-provider-brand">
+                <div class="api-card-icon bing-icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="api-provider-name">Microsoft Bing Search API</h2>
+                  <span class="api-provider-capability">Real Search Volume &amp; Index Document Matches</span>
+                </div>
+              </div>
+              <div class="api-card-status" id="bingCardStatus">
+                <span class="status-dot dot-inactive"></span>
+                <span class="status-label">Not configured</span>
+              </div>
+            </div>
+
+            <p class="api-card-desc">
+              Fetches real-time search volume and estimated matching web pages from Bing's index for every keyword on your analyzed pages, replacing estimates with live search data.
+            </p>
+
+            <form class="api-card-form" id="formBingKey" onsubmit="return false;">
+              <div class="form-group">
+                <label for="bingApiKeyInput" class="form-label">
+                  <span>Bing API Key (Ocp-Apim-Subscription-Key)</span>
+                  <a href="https://portal.azure.com/#blade/HubsExtension/BrowseResource/resourceType/Microsoft.CognitiveServices%2Faccounts" target="_blank" rel="noopener noreferrer" class="link-external">Get Azure Key &nearr;</a>
+                </label>
+                <div class="input-with-tools">
+                  <input
+                    type="password"
+                    id="bingApiKeyInput"
+                    class="text-input font-mono"
+                    placeholder="Enter your 32-character Bing API key…"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button type="button" class="btn-input-icon" id="btnToggleBingKeyVis" title="Show / hide key">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" id="eyeIconBing">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </button>
+                  <button type="button" class="btn-input-icon" id="btnClearBingKeyInput" title="Clear input">
+                    &times;
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label for="bingServiceType" class="form-label">Service / Endpoint Flavor</label>
+                  <select id="bingServiceType" class="select-input">
+                    <option value="azure" selected>Azure Bing Web Search API v7 (Recommended)</option>
+                    <option value="webmaster">Bing Webmaster Tools Keyword API</option>
+                    <option value="custom">Custom Azure Search Endpoint</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="bingMarket" class="form-label">Market / Country Targeting</label>
+                  <select id="bingMarket" class="select-input">
+                    <option value="en-US" selected>en-US (United States)</option>
+                    <option value="en-GB">en-GB (United Kingdom)</option>
+                    <option value="en-CA">en-CA (Canada)</option>
+                    <option value="en-AU">en-AU (Australia)</option>
+                    <option value="de-DE">de-DE (Germany)</option>
+                    <option value="fr-FR">fr-FR (France)</option>
+                    <option value="es-ES">es-ES (Spain)</option>
+                    <option value="ja-JP">ja-JP (Japan)</option>
+                    <option value="global">All / Global</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group" id="bingCustomEndpointGroup" hidden>
+                <label for="bingCustomEndpointInput" class="form-label">Custom Endpoint URL</label>
+                <input
+                  type="url"
+                  id="bingCustomEndpointInput"
+                  class="text-input font-mono"
+                  placeholder="https://your-resource-name.cognitiveservices.azure.com/bing/v7.0/search"
+                />
+              </div>
+
+              <div class="form-group-checkbox">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="bingAutoFetchCheck" />
+                  <span>Automatically fetch Bing search volume for top keywords during page analysis</span>
+                </label>
+              </div>
+
+              <div class="api-card-actions">
+                <button type="button" class="btn btn-sm btn-primary-action" id="btnSaveBingKey">
+                  Save Bing Key
+                </button>
+                <button type="button" class="btn btn-sm" id="btnTestBingKey">
+                  Test Connection
+                </button>
+                <button type="button" class="btn btn-sm btn-danger-subtle" id="btnRemoveBingKey">
+                  Remove Key
+                </button>
+              </div>
+
+              <!-- Test feedback / diagnostic banner -->
+              <div class="api-test-feedback" id="bingTestFeedback" hidden></div>
+            </form>
+          </article>
+
+          <!-- CARD 2: OPENAI / SEMANTIC ENRICHMENT (COMING SOON) -->
+          <article class="api-card api-card-disabled">
+            <div class="api-card-header">
+              <div class="api-provider-brand">
+                <div class="api-card-icon openai-icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="api-provider-name">OpenAI API</h2>
+                  <span class="api-provider-capability">Semantic Intent, Content Gap Analysis &amp; Clustering</span>
+                </div>
+              </div>
+              <div class="api-card-status">
+                <span class="status-badge badge-upcoming">Coming soon</span>
+              </div>
+            </div>
+            <p class="api-card-desc">
+              Will integrate GPT-4o / embeddings for search intent classification, automatic semantic cluster label generation, and automated content brief expansion.
+            </p>
+            <div class="form-group disabled-group">
+              <label class="form-label">OpenAI API Key (sk-…)</label>
+              <input type="password" class="text-input font-mono" placeholder="sk-proj-… (Coming in next release)" disabled />
+            </div>
+          </article>
+
+          <!-- CARD 3: GOOGLE SEARCH CONSOLE (COMING SOON) -->
+          <article class="api-card api-card-disabled">
+            <div class="api-card-header">
+              <div class="api-provider-brand">
+                <div class="api-card-icon google-icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="api-provider-name">Google Search Console API</h2>
+                  <span class="api-provider-capability">Verified Organic Impressions, Clicks &amp; Positions</span>
+                </div>
+              </div>
+              <div class="api-card-status">
+                <span class="status-badge badge-upcoming">Coming soon</span>
+              </div>
+            </div>
+            <p class="api-card-desc">
+              Will correlate on-page heading structure directly with Google performance data (actual clicks, impressions, and CTR) for verified properties.
+            </p>
+            <div class="form-group disabled-group">
+              <label class="form-label">Google OAuth / Service Account</label>
+              <input type="text" class="text-input font-mono" placeholder="Google Search Console Service Account (Coming soon)" disabled />
+            </div>
+          </article>
+
+          <!-- CARD 4: DATAFORSEO / SEMRUSH (COMING SOON) -->
+          <article class="api-card api-card-disabled">
+            <div class="api-card-header">
+              <div class="api-provider-brand">
+                <div class="api-card-icon dataforseo-icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="api-provider-name">DataForSEO &amp; SERP APIs</h2>
+                  <span class="api-provider-capability">Historical Monthly Volumes, CPC Bids &amp; Keyword Difficulty</span>
+                </div>
+              </div>
+              <div class="api-card-status">
+                <span class="status-badge badge-upcoming">Coming soon</span>
+              </div>
+            </div>
+            <p class="api-card-desc">
+              Will supply monthly historical search volumes, Google Ads cost-per-click values, and competitive keyword difficulty metrics across multiple regions.
+            </p>
+            <div class="form-group disabled-group">
+              <label class="form-label">API Credentials</label>
+              <input type="text" class="text-input font-mono" placeholder="DataForSEO Login / Token (Coming soon)" disabled />
+            </div>
+          </article>
+        </div>
+
+        <!-- Global Storage Footer -->
+        <div class="api-keys-footer">
+          <div class="footer-actions">
+            <button type="button" class="btn btn-sm btn-danger-subtle" id="btnClearAllKeys">
+              Clear All Stored Keys
+            </button>
+          </div>
+          <span class="footer-note muted small">
+            Need help? Bing API keys can be obtained from the <a href="https://azure.microsoft.com/en-us/pricing/details/cognitive-services/search-api/" target="_blank" rel="noopener noreferrer" class="link-external">Microsoft Azure Portal</a>. Free and pay-as-you-go tiers are supported.
+          </span>
+        </div>
+      </div>
     </main>
 
     <div id="tip" role="tooltip"></div>

@@ -1,10 +1,15 @@
 import type { Config, Context } from '@netlify/functions';
-import { handleAnalyzeRequest } from '../../src/lib/api-handler';
+import { handleApiRequest } from '../../src/lib/api-handler';
 
 export default async (req: Request, _context: Context): Promise<Response> => {
-  return handleAnalyzeRequest(req);
+  return handleApiRequest(req);
 };
 
 export const config: Config = {
-  path: ['/api/page-structure/analyze', '/api/analyze'],
+  path: [
+    '/api/page-structure/analyze',
+    '/api/analyze',
+    '/api/keywords/volume',
+    '/api/volume',
+  ],
 };

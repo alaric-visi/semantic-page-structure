@@ -84,3 +84,126 @@ export async function handleAnalyzeRequest(request: Request): Promise<Response> 
   }
 }
 
+export async function handleVolumeRequest(request: Request): Promise<Response> {
+  if (request.method !== 'POST') {
+    return jsonResponse({ error: 'POST only.' }, 405);
+  }
+
+  let rawText: string;
+  try {
+    rawText = await request.text();
+  } catch {
+    return jsonResponse({ error: 'Could not read request body.' }, 400);
+  }
+
+  let payload: {
+    action?: string;
+    provider?: string;
+    apiKey?: string;
+    serviceType?: string;
+    customEndpoint?: string;
+    market?: string;
+    keywords?: string[];
+  };
+
+  try {
+    payload = JSON.parse(rawText || '{}');
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body.' }, 400);
+  }
+
+  const apiKey = (payload.apiKey || '').trim();
+  if (!apiKey) {
+    return jsonResponse({ error: 'No API key provided.' }, 400);
+  }
+
+  const endpoint =
+    payload.serviceType === 'custom' && payload.customEndpoint
+      ? payload.customEndpoint
+      : 'https://api.bing.microsoft.com/v7.0/search';
+  const mkt = payload.market || 'en-US';
+
+  if (payload.action === 'test') {
+    try {
+      const testUrl = `${endpoint}?q=seo&count=1&mkt=${encodeURIComponent(mkt)}`;
+      const res = await fetch(testUrl, {
+        method: 'GET',
+        headers: {
+          'Ocp-Apim-Subscription-Key': apiKey,
+          Pragma: 'no-cache',
+        },
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        const errMsg =
+          errJson?.error?.message ||
+          errJson?.message ||
+          `Bing API returned HTTP ${res.status}: ${res.statusText}`;
+        return jsonResponse(
+          { error: errMsg },
+          res.status >= 400 && res.status < 600 ? res.status : 400
+        );
+      }
+
+      const json = await res.json();
+      const sampleMatches =
+        json.webPages?.totalEstimatedMatches ??
+        json.totalEstimatedMatches ??
+        null;
+      return jsonResponse({ ok: true, sampleMatches }, 200);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return jsonResponse({ error: `Connection failed: ${msg}` }, 500);
+    }
+  }
+
+  const keywords = Array.isArray(payload.keywords) ? payload.keywords : [];
+  if (!keywords.length) {
+    return jsonResponse({ error: 'No keywords provided.' }, 400);
+  }
+
+  const results: Record<string, number> = {};
+  const batch = keywords.slice(0, 40);
+
+  await Promise.all(
+    batch.map(async (kw) => {
+      try {
+        const url = `${endpoint}?q=${encodeURIComponent(kw)}&count=1&mkt=${encodeURIComponent(mkt)}`;
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Ocp-Apim-Subscription-Key': apiKey,
+            Pragma: 'no-cache',
+          },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const vol =
+            json.webPages?.totalEstimatedMatches ??
+            json.totalEstimatedMatches ??
+            null;
+          if (vol != null && typeof vol === 'number') {
+            results[kw] = vol;
+          }
+        }
+      } catch {
+        // Individual keyword failures don't abort batch
+      }
+    })
+  );
+
+  return jsonResponse({ ok: true, results }, 200);
+}
+
+export async function handleApiRequest(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  if (
+    url.pathname === '/api/keywords/volume' ||
+    url.pathname === '/api/volume'
+  ) {
+    return handleVolumeRequest(request);
+  }
+  return handleAnalyzeRequest(request);
+}
+

@@ -6,6 +6,15 @@ import type {
   KeywordEntry,
   SectionEntry,
 } from './lib/types';
+import {
+  getStoredApiKeys,
+  getBingConfig,
+  saveBingConfig,
+  removeBingConfig,
+  clearAllApiKeys,
+  type BingApiConfig,
+} from './lib/api-keys';
+import { testBingKey, fetchKeywordVolumeBatch } from './lib/bing-service';
 
 interface ClientKeyword extends KeywordEntry {
   _inHeadings: number[];
@@ -175,10 +184,286 @@ function initStudio(): void {
   });
 
   document.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && graphPanelEl?.classList.contains('is-fullscreen')) {
-      setGraphFullscreen(false, true);
+    if (e.key === 'Escape') {
+      if (rootEl?.getAttribute('data-active-page') === 'keys') {
+        closeApiKeysPage();
+        return;
+      }
+      if (graphPanelEl?.classList.contains('is-fullscreen')) {
+        setGraphFullscreen(false, true);
+      }
     }
   });
+
+  // ------------------------------------------------------------------ Dedicated API Keys Page Controller
+  const btnApiKeys = $<HTMLButtonElement>('#btn-api-keys');
+  const btnBackToStudio = $<HTMLButtonElement>('#btn-back-to-studio');
+  const pageApiKeys = $('#page-api-keys');
+  const headerKeyDot = $('#header-key-dot');
+
+  // Form elements inside Bing card
+  const bingApiKeyInput = $<HTMLInputElement>('#bingApiKeyInput');
+  const btnToggleBingKeyVis = $<HTMLButtonElement>('#btnToggleBingKeyVis');
+  const btnClearBingKeyInput = $<HTMLButtonElement>('#btnClearBingKeyInput');
+  const bingServiceType = $<HTMLSelectElement>('#bingServiceType');
+  const bingMarket = $<HTMLSelectElement>('#bingMarket');
+  const bingCustomEndpointGroup = $('#bingCustomEndpointGroup');
+  const bingCustomEndpointInput = $<HTMLInputElement>('#bingCustomEndpointInput');
+  const bingAutoFetchCheck = $<HTMLInputElement>('#bingAutoFetchCheck');
+  const btnSaveBingKey = $<HTMLButtonElement>('#btnSaveBingKey');
+  const btnTestBingKey = $<HTMLButtonElement>('#btnTestBingKey');
+  const btnRemoveBingKey = $<HTMLButtonElement>('#btnRemoveBingKey');
+  const bingTestFeedback = $('#bingTestFeedback');
+  const bingCardStatus = $('#bingCardStatus');
+  const btnClearAllKeys = $<HTMLButtonElement>('#btnClearAllKeys');
+
+  function updateKeyIndicator(): void {
+    const bing = getBingConfig();
+    const hasKey = Boolean(bing?.key);
+    headerKeyDot?.classList.toggle('dot-active', hasKey);
+    headerKeyDot?.setAttribute(
+      'title',
+      hasKey
+        ? `Bing API key configured (${bing?.serviceType || 'azure'})`
+        : 'No API keys set'
+    );
+  }
+
+  function updateBingCardStatus(
+    status: 'connected' | 'inactive' | 'testing' | 'error',
+    text?: string
+  ): void {
+    if (!bingCardStatus) return;
+    const dot = bingCardStatus.querySelector('.status-dot');
+    const label = bingCardStatus.querySelector('.status-label');
+    if (dot) {
+      dot.className = `status-dot ${
+        status === 'connected'
+          ? 'dot-active'
+          : status === 'testing'
+            ? 'dot-testing'
+            : 'dot-inactive'
+      }`;
+    }
+    if (label) {
+      label.textContent =
+        text ||
+        (status === 'connected'
+          ? 'Connected & Ready'
+          : status === 'testing'
+            ? 'Testing connection…'
+            : status === 'error'
+              ? 'Key error'
+              : 'Not configured');
+    }
+  }
+
+  function syncBingFormFromStorage(): void {
+    const bing = getBingConfig();
+    if (bingApiKeyInput) bingApiKeyInput.value = bing?.key || '';
+    if (bingServiceType) bingServiceType.value = bing?.serviceType || 'azure';
+    if (bingMarket) bingMarket.value = bing?.market || 'en-US';
+    if (bingCustomEndpointInput) {
+      bingCustomEndpointInput.value = bing?.customEndpoint || '';
+    }
+    if (bingCustomEndpointGroup) {
+      bingCustomEndpointGroup.hidden = bing?.serviceType !== 'custom';
+    }
+    if (bingAutoFetchCheck) {
+      bingAutoFetchCheck.checked = Boolean(bing?.autoFetch);
+    }
+    updateBingCardStatus(bing?.key ? 'connected' : 'inactive');
+    if (bingTestFeedback) {
+      bingTestFeedback.hidden = true;
+      bingTestFeedback.className = 'api-test-feedback';
+      bingTestFeedback.textContent = '';
+    }
+  }
+
+  function openApiKeysPage(): void {
+    setGraphFullscreen(false);
+    rootEl!.setAttribute('data-active-page', 'keys');
+    pageApiKeys?.removeAttribute('hidden');
+    syncBingFormFromStorage();
+    if (window.location.hash !== '#api-keys') {
+      window.location.hash = 'api-keys';
+    }
+  }
+
+  function closeApiKeysPage(): void {
+    rootEl!.removeAttribute('data-active-page');
+    pageApiKeys?.setAttribute('hidden', '');
+    updateKeyIndicator();
+    if (window.location.hash === '#api-keys') {
+      history.replaceState(
+        null,
+        '',
+        window.location.pathname + window.location.search
+      );
+    }
+    if (state.data) {
+      renderTable();
+      renderDetail(null);
+    }
+  }
+
+  btnApiKeys?.addEventListener('click', () => {
+    if (rootEl!.getAttribute('data-active-page') === 'keys') {
+      closeApiKeysPage();
+    } else {
+      openApiKeysPage();
+    }
+  });
+
+  btnBackToStudio?.addEventListener('click', () => {
+    closeApiKeysPage();
+  });
+
+  btnToggleBingKeyVis?.addEventListener('click', () => {
+    if (!bingApiKeyInput) return;
+    const isPass = bingApiKeyInput.type === 'password';
+    bingApiKeyInput.type = isPass ? 'text' : 'password';
+    btnToggleBingKeyVis.setAttribute(
+      'title',
+      isPass ? 'Hide key' : 'Show key'
+    );
+  });
+
+  btnClearBingKeyInput?.addEventListener('click', () => {
+    if (bingApiKeyInput) {
+      bingApiKeyInput.value = '';
+      bingApiKeyInput.focus();
+    }
+  });
+
+  bingServiceType?.addEventListener('change', () => {
+    if (bingCustomEndpointGroup) {
+      bingCustomEndpointGroup.hidden = bingServiceType.value !== 'custom';
+    }
+  });
+
+  btnSaveBingKey?.addEventListener('click', () => {
+    const key = bingApiKeyInput?.value.trim() || '';
+    if (!key) {
+      removeBingConfig();
+      updateBingCardStatus('inactive', 'Not configured');
+      updateKeyIndicator();
+      if (bingTestFeedback) {
+        bingTestFeedback.hidden = false;
+        bingTestFeedback.className = 'api-test-feedback is-error';
+        bingTestFeedback.textContent = 'Bing API key cleared.';
+      }
+      return;
+    }
+
+    const cfg: Partial<BingApiConfig> = {
+      key,
+      serviceType: (bingServiceType?.value as any) || 'azure',
+      market: bingMarket?.value || 'en-US',
+      customEndpoint: bingCustomEndpointInput?.value.trim(),
+      autoFetch: bingAutoFetchCheck?.checked ?? false,
+    };
+    saveBingConfig(cfg);
+    updateBingCardStatus('connected', 'Saved & Connected');
+    updateKeyIndicator();
+
+    if (bingTestFeedback) {
+      bingTestFeedback.hidden = false;
+      bingTestFeedback.className = 'api-test-feedback is-success';
+      bingTestFeedback.textContent =
+        '✓ Bing API key saved safely in your browser storage. You can now fetch real search volumes!';
+    }
+  });
+
+  btnTestBingKey?.addEventListener('click', async () => {
+    const key = bingApiKeyInput?.value.trim() || '';
+    if (!key) {
+      if (bingTestFeedback) {
+        bingTestFeedback.hidden = false;
+        bingTestFeedback.className = 'api-test-feedback is-error';
+        bingTestFeedback.textContent = 'Please enter an API key to test.';
+      }
+      return;
+    }
+
+    const cfg: BingApiConfig = {
+      key,
+      serviceType: (bingServiceType?.value as any) || 'azure',
+      market: bingMarket?.value || 'en-US',
+      customEndpoint: bingCustomEndpointInput?.value.trim(),
+    };
+
+    updateBingCardStatus('testing');
+    if (btnTestBingKey) btnTestBingKey.disabled = true;
+    if (bingTestFeedback) {
+      bingTestFeedback.hidden = false;
+      bingTestFeedback.className = 'api-test-feedback is-loading';
+      bingTestFeedback.textContent = 'Connecting to Microsoft Bing API…';
+    }
+
+    try {
+      const res = await testBingKey(cfg);
+      if (res.ok) {
+        updateBingCardStatus('connected', 'Verified & Working');
+        saveBingConfig({ ...cfg, isValid: true });
+        updateKeyIndicator();
+        if (bingTestFeedback) {
+          bingTestFeedback.className = 'api-test-feedback is-success';
+          const sampleText =
+            res.sampleVolume != null
+              ? ` Sample search test query ("seo") found ${fmt(res.sampleVolume)} estimated matches.`
+              : '';
+          bingTestFeedback.textContent = `✓ Success: ${res.message} (latency ${res.latencyMs}ms).${sampleText}`;
+        }
+      } else {
+        updateBingCardStatus('error', 'Connection failed');
+        if (bingTestFeedback) {
+          bingTestFeedback.className = 'api-test-feedback is-error';
+          bingTestFeedback.textContent = `✗ ${res.message}`;
+        }
+      }
+    } finally {
+      if (btnTestBingKey) btnTestBingKey.disabled = false;
+    }
+  });
+
+  btnRemoveBingKey?.addEventListener('click', () => {
+    removeBingConfig();
+    if (bingApiKeyInput) bingApiKeyInput.value = '';
+    updateBingCardStatus('inactive');
+    updateKeyIndicator();
+    if (bingTestFeedback) {
+      bingTestFeedback.hidden = false;
+      bingTestFeedback.className = 'api-test-feedback';
+      bingTestFeedback.textContent =
+        'Bing API key removed from browser storage.';
+    }
+  });
+
+  btnClearAllKeys?.addEventListener('click', () => {
+    if (confirm('Clear all stored API keys from this browser?')) {
+      clearAllApiKeys();
+      syncBingFormFromStorage();
+      updateKeyIndicator();
+    }
+  });
+
+  // Global delegation for opening API keys from table links or detail inspector
+  rootEl?.addEventListener('click', (e) => {
+    const target = (e.target as HTMLElement).closest<HTMLElement>(
+      '[data-action="open-keys"], .btn-table-key-link'
+    );
+    if (target) {
+      e.preventDefault();
+      openApiKeysPage();
+    }
+  });
+
+  // Check URL hash on startup for direct link to API keys page
+  if (window.location.hash === '#api-keys') {
+    openApiKeysPage();
+  }
+  updateKeyIndicator();
 
   function setViewMode(v: string): void {
     if (v === 'input') setGraphFullscreen(false);
@@ -406,6 +691,13 @@ function initStudio(): void {
     renderTable();
     renderText();
     renderReport();
+
+    const bing = getBingConfig();
+    if (bing?.key && bing?.autoFetch) {
+      setTimeout(() => {
+        triggerFetchBingVolume(true);
+      }, 300);
+    }
   }
 
   // ------------------------------------------------------------------ Summary & Neon Gauge Helper
@@ -2428,6 +2720,14 @@ function initStudio(): void {
         .filter(Boolean);
       const secName = (id: number) =>
         esc(trunc(state.secById[id]?.heading || '', 40));
+      const bing = getBingConfig();
+      const volText =
+        k.search_volume != null
+          ? `<b>${fmt(k.search_volume)}</b> matches <span class="tag-bing">Bing</span>`
+          : bing?.key
+            ? `<span class="muted">Not fetched</span> · <button type="button" class="btn-table-key-link" id="btnDetailFetchThisKw">Fetch</button>`
+            : `<button type="button" class="btn-table-key-link" data-action="open-keys">+ Connect Bing API</button>`;
+
       el.innerHTML = `<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
           ${gaugeRingSvg(k.relevance, String(Math.round(k.relevance)), 'g-det-kw')}
           <div style="min-width:0;flex:1">
@@ -2435,13 +2735,36 @@ function initStudio(): void {
             <span class="tier ${esc(k.tier)}">${esc(k.tier)}</span> <span class="muted small">Rank #${k.rank} · ${esc(k.cluster)}</span>
           </div>
         </div>
-        <dl><dt>Relevance</dt><dd><b>${k.relevance}</b> / 100</dd><dt>Frequency</dt><dd>${k.frequency} (${k.body_count} in body copy)</dd>
+        <dl><dt>Relevance</dt><dd><b>${k.relevance}</b> / 100</dd>
+        <dt>Search Vol.</dt><dd>${volText}</dd>
+        <dt>Frequency</dt><dd>${k.frequency} (${k.body_count} in body copy)</dd>
         <dt>Density</dt><dd>${k.density}%</dd><dt>Sections</dt><dd>${k.section_count}</dd>
         <dt>First seen</dt><dd>${k.first_position == null ? 'headings only' : k.first_position + '% into the copy'}</dd></dl>
         <h4>Placements</h4>${placements(k)}
         ${k._inHeadings?.length ? `<h4>Targeted by headings</h4>${k._inHeadings.map((id) => `<span class="tag">${secName(id)}</span>`).join('')}` : ''}
         ${k._supports?.length ? `<h4>Supports sections</h4>${k._supports.map((id) => `<span class="tag">${secName(id)}</span>`).join('')}` : ''}
         ${co.length ? `<h4>Co-occurs with</h4>${co.map((c) => `<span class="tag">${esc(c.keyword)}</span>`).join('')}` : ''}`;
+
+      $('#btnDetailFetchThisKw')?.addEventListener('click', async () => {
+        const b = getBingConfig();
+        if (!b) return;
+        const btn = $<HTMLButtonElement>('#btnDetailFetchThisKw');
+        if (btn) btn.textContent = 'Fetching…';
+        try {
+          const res = await fetchKeywordVolumeBatch([k.keyword], b);
+          if (res[k.keyword] != null) {
+            k.search_volume = res[k.keyword];
+            if (state.data) {
+              const found = state.data.keywords.find((x) => x.id === k.id);
+              if (found) found.search_volume = res[k.keyword];
+            }
+            renderDetail({ type: 'kw', ref: k });
+            renderTable();
+          }
+        } finally {
+          if (btn) btn.textContent = 'Fetch';
+        }
+      });
       return;
     }
 
@@ -2496,6 +2819,7 @@ function initStudio(): void {
   const COLS: Array<[string, string, string?]> = [
     ['rank', '#', 'num'],
     ['keyword', 'Keyword'],
+    ['search_volume', 'Search Vol. (Bing)', 'num'],
     ['relevance', 'Relevance', 'num'],
     ['tier', 'Tier'],
     ['cluster', 'Cluster'],
@@ -2512,6 +2836,89 @@ function initStudio(): void {
     ['emphasis_count', 'Bold', 'num'],
     ['first_position', 'First seen %', 'num'],
   ];
+
+  const btnFetchBingVol = $<HTMLButtonElement>('#btnFetchBingVol');
+  const bingVolStatus = $('#bingVolStatus');
+
+  async function triggerFetchBingVolume(silent = false): Promise<void> {
+    if (!state.data || !state.data.keywords.length) {
+      if (!silent) showErr('Analyze a page first before fetching keyword volumes.');
+      return;
+    }
+
+    const bing = getBingConfig();
+    if (!bing || !bing.key) {
+      if (!silent) {
+        openApiKeysPage();
+        if (bingTestFeedback) {
+          bingTestFeedback.hidden = false;
+          bingTestFeedback.className = 'api-test-feedback is-loading';
+          bingTestFeedback.textContent =
+            'Please enter and save your Bing API key to fetch real search volume.';
+        }
+      }
+      return;
+    }
+
+    const keywordsToFetch = state.data.keywords
+      .slice(0, 40)
+      .map((k) => k.keyword);
+    if (!keywordsToFetch.length) return;
+
+    if (btnFetchBingVol) btnFetchBingVol.disabled = true;
+    if (bingVolStatus) {
+      bingVolStatus.hidden = false;
+      bingVolStatus.textContent = `Fetching Bing volume (0/${keywordsToFetch.length})…`;
+    }
+
+    try {
+      const volMap = await fetchKeywordVolumeBatch(
+        keywordsToFetch,
+        bing,
+        (done, total) => {
+          if (bingVolStatus) {
+            bingVolStatus.textContent = `Fetching Bing volume (${done}/${total})…`;
+          }
+        }
+      );
+
+      let updatedCount = 0;
+      state.data.keywords.forEach((k) => {
+        const v = volMap[k.keyword];
+        if (v != null) {
+          k.search_volume = v;
+          if (state.kwById[k.id]) {
+            state.kwById[k.id].search_volume = v;
+          }
+          updatedCount++;
+        }
+      });
+
+      renderTable();
+      if (state.selected) {
+        const selNode = state.kwById[state.selected];
+        if (selNode) renderDetail({ type: 'kw', ref: selNode });
+      }
+
+      if (bingVolStatus) {
+        bingVolStatus.textContent = `✓ ${updatedCount} keyword volumes synced`;
+        setTimeout(() => {
+          if (bingVolStatus) bingVolStatus.hidden = true;
+        }, 5000);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (bingVolStatus) {
+        bingVolStatus.textContent = `Bing volume error: ${msg}`;
+      }
+    } finally {
+      if (btnFetchBingVol) btnFetchBingVol.disabled = false;
+    }
+  }
+
+  btnFetchBingVol?.addEventListener('click', () => {
+    triggerFetchBingVolume(false);
+  });
 
   $<HTMLInputElement>('#filter')?.addEventListener('input', (e) => {
     state.filter = (e.target as HTMLInputElement).value.toLowerCase();
@@ -2554,6 +2961,16 @@ function initStudio(): void {
     }
     const cell = (k: ClientKeyword, [key, , cls]: [string, string, string?]) => {
       const v = (k as any)[key];
+      if (key === 'search_volume') {
+        const bing = getBingConfig();
+        if (v != null && typeof v === 'number') {
+          return `<td class="num font-mono"><b>${fmt(v)}</b><span class="tag-bing">Bing</span></td>`;
+        }
+        if (bing && bing.key) {
+          return `<td class="num muted">–</td>`;
+        }
+        return `<td class="num"><button type="button" class="btn-table-key-link" data-action="open-keys" title="Enter Bing API key to fetch real volume">+ Connect Bing</button></td>`;
+      }
       if (key === 'relevance') {
         return `<td class="num"><b>${v}</b><span class="bar" style="width:${Number(v) * 0.5}px"></span></td>`;
       }
@@ -2602,6 +3019,7 @@ function initStudio(): void {
     const head = [
       'rank',
       'keyword',
+      'search_volume_bing',
       'relevance',
       'tier',
       'cluster',
@@ -2627,6 +3045,7 @@ function initStudio(): void {
     const rows = filteredKeywords().map((k) => [
       k.rank,
       k.keyword,
+      k.search_volume ?? '',
       k.relevance,
       k.tier,
       k.cluster,

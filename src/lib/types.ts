@@ -43,6 +43,8 @@ export interface KeywordEntry {
   first_position: number | null;
   raw_score: number;
   cluster?: string;
+  search_volume?: number | null;
+  search_volume_formatted?: string | null;
 }
 
 export interface HeadingKeywordRef {

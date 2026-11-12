@@ -14,7 +14,7 @@ import { register } from 'tsx/esm/api';
 
 register();
 
-const { handleAnalyzeRequest } = await import('./src/lib/api-handler.ts');
+const { handleApiRequest } = await import('./src/lib/api-handler.ts');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -36,7 +36,9 @@ const server = http.createServer(async (req, res) => {
 
   if (
     urlPath === '/api/page-structure/analyze' ||
-    urlPath === '/api/analyze'
+    urlPath === '/api/analyze' ||
+    urlPath === '/api/keywords/volume' ||
+    urlPath === '/api/volume'
   ) {
     try {
       const chunks = [];
@@ -57,7 +59,7 @@ const server = http.createServer(async (req, res) => {
             ? bodyBuf
             : undefined,
       });
-      const webRes = await handleAnalyzeRequest(webReq);
+      const webRes = await handleApiRequest(webReq);
       res.statusCode = webRes.status;
       webRes.headers.forEach((val, key) => res.setHeader(key, val));
       res.end(await webRes.text());
