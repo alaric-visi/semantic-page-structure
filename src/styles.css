@@ -2218,16 +2218,19 @@ body {
 
 #page-structure-studio .page-api-keys {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background: radial-gradient(circle at 50% 0%, rgba(0, 229, 255, 0.08) 0%, transparent 60%),
               radial-gradient(circle at 90% 80%, rgba(255, 42, 133, 0.06) 0%, transparent 50%),
               var(--bg-base);
-  padding: 24px 20px 48px;
+  padding: 16px 18px 48px;
+  width: 100%;
 }
 
 .api-keys-container {
-  max-width: 980px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
 }
 
 .api-keys-topbar {
@@ -2299,7 +2302,7 @@ body {
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--text-secondary);
-  max-width: 760px;
+  max-width: 100%;
   margin: 0;
 }
 
@@ -2670,16 +2673,53 @@ body {
 }
 
 #page-structure-studio .tag-bing {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 1px 5px;
   font-size: 9.5px;
   font-family: var(--font-mono);
+  font-weight: 600;
   text-transform: uppercase;
-  border-radius: 3px;
-  background: rgba(0, 229, 255, 0.15);
-  border: 1px solid rgba(0, 229, 255, 0.3);
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.18) 0%, rgba(59, 130, 246, 0.18) 100%);
+  border: 1px solid rgba(0, 229, 255, 0.42);
+  color: #67e8f9;
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.18);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+#page-structure-studio .tag-bing-ghost {
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px dashed rgba(0, 229, 255, 0.3);
+  color: var(--text-tertiary);
+  box-shadow: none;
+}
+
+#page-structure-studio .btn-table-fetch-kw {
+  background: none;
+  border: 0;
+  padding: 1px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+  color: inherit;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+#page-structure-studio .btn-table-fetch-kw:hover {
+  background: rgba(0, 229, 255, 0.12);
+}
+
+#page-structure-studio .btn-table-fetch-kw:hover .tag-bing-ghost {
+  background: rgba(0, 229, 255, 0.22);
+  border-color: rgba(0, 229, 255, 0.55);
   color: var(--accent);
-  margin-left: 4px;
 }
 
 #page-structure-studio .btn-table-key-link {

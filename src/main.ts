@@ -227,6 +227,12 @@ function initStudio(): void {
         ? `Bing API key configured (${bing?.serviceType || 'azure'})`
         : 'No API keys set'
     );
+    const fetchBtn = $<HTMLButtonElement>('#btnFetchBingVol');
+    if (fetchBtn) {
+      fetchBtn.title = hasKey
+        ? 'Fetch real keyword search volume from Bing API'
+        : 'Connect Bing API key to fetch real volume';
+    }
   }
 
   function updateBingCardStatus(
@@ -456,6 +462,52 @@ function initStudio(): void {
     if (target) {
       e.preventDefault();
       openApiKeysPage();
+      return;
+    }
+
+    const fetchBtn = (e.target as HTMLElement).closest<HTMLButtonElement>(
+      '[data-action="fetch-one"]'
+    );
+    if (fetchBtn) {
+      e.preventDefault();
+      const kw = fetchBtn.dataset.kw;
+      const id = fetchBtn.dataset.id;
+      const bing = getBingConfig();
+      if (!bing?.key) {
+        openApiKeysPage();
+        return;
+      }
+      if (kw) {
+        fetchBtn.disabled = true;
+        const origHtml = fetchBtn.innerHTML;
+        fetchBtn.innerHTML = `<span class="muted small">…</span> <span class="tag-bing">Bing</span>`;
+        fetchKeywordVolumeBatch([kw], bing)
+          .then((res) => {
+            const vol = res[kw];
+            if (vol != null && state.data) {
+              const k = state.data.keywords.find(
+                (x) => x.keyword === kw || x.id === id
+              );
+              if (k) k.search_volume = vol;
+              if (id && state.kwById[id]) state.kwById[id].search_volume = vol;
+              renderTable();
+              renderSummary();
+              renderReport();
+              if (state.selected) {
+                const selNode = state.kwById[state.selected];
+                if (selNode) renderDetail({ type: 'kw', ref: selNode });
+              }
+            } else {
+              fetchBtn.disabled = false;
+              fetchBtn.innerHTML = origHtml;
+            }
+          })
+          .catch(() => {
+            fetchBtn.disabled = false;
+            fetchBtn.innerHTML = origHtml;
+          });
+      }
+      return;
     }
   });
 
@@ -741,11 +793,17 @@ function initStudio(): void {
       ? Math.round(d3.mean(secs, (s) => s.alignment ?? 0) ?? 0)
       : 0;
 
+    const mainKwVol = d.main_topic?.id ? state.kwById[d.main_topic.id]?.search_volume : null;
+    const mainVolBadge =
+      mainKwVol != null
+        ? ` · <span class="tag-bing" title="Verified search volume from Bing API">Bing: ${fmt(mainKwVol)}</span>`
+        : '';
+
     const summaryEl = $('#summary');
     if (!summaryEl) return;
     summaryEl.innerHTML = `
       <div class="card"><div class="k">Main topic</div><div class="v topic">${esc(d.main_topic?.keyword || '–')}</div>
-        <div class="s" title="${esc(m.title)}">${esc(m.title || d.url)}</div></div>
+        <div class="s" title="${esc(m.title)}">${esc(m.title || d.url)}${mainVolBadge}</div></div>
       <div class="card card-gauge">
         ${gaugeRingSvg(avgAlign, `${avgAlign}%`, 'g-align')}
         <div class="gauge-info">
@@ -2646,7 +2704,11 @@ function initStudio(): void {
     if (!tipEl) return;
     let h = `<b>${esc(n.label)}</b>`;
     if (n.type === 'kw' && n.ref) {
-      h += `<br>Relevance ${n.ref.relevance} · ${esc(n.ref.tier)}<br>${n.ref.frequency}× in copy & headings · ${n.ref.section_count} sections`;
+      const volBadge =
+        n.ref.search_volume != null
+          ? ` · <span class="tag-bing" title="Search volume from Bing">Bing: ${fmt(n.ref.search_volume)}</span>`
+          : '';
+      h += `<br>Relevance ${n.ref.relevance} · ${esc(n.ref.tier)}${volBadge}<br>${n.ref.frequency}× in copy & headings · ${n.ref.section_count} sections`;
     } else if (n.type === 'cluster' && n.ref) {
       h += `<br>${n.ref.keywords.length} keywords · strength ${n.ref.strength}`;
     } else if (n.type === 'section' && n.ref) {
@@ -2702,7 +2764,7 @@ function initStudio(): void {
           .map(
             (k) =>
               `<div class="signal-row">
-                <div class="signal-row-top"><span>${esc(k.keyword)}</span><span class="mono muted">${k.relevance}</span></div>
+                <div class="signal-row-top"><span>${esc(k.keyword)}</span><span>${k.search_volume != null ? `<span class="tag-bing" title="Search volume from Bing">Bing: ${fmt(k.search_volume)}</span> ` : ''}<span class="mono muted">${k.relevance}</span></span></div>
                 <div class="signal-bar-track"><div class="signal-bar-fill" style="width:${Math.max(4, k.relevance)}%"></div></div>
               </div>`
           )
@@ -2723,9 +2785,9 @@ function initStudio(): void {
       const bing = getBingConfig();
       const volText =
         k.search_volume != null
-          ? `<b>${fmt(k.search_volume)}</b> matches <span class="tag-bing">Bing</span>`
+          ? `<b>${fmt(k.search_volume)}</b> searches <span class="tag-bing" title="Verified source: Bing API">Bing</span>`
           : bing?.key
-            ? `<span class="muted">Not fetched</span> · <button type="button" class="btn-table-key-link" id="btnDetailFetchThisKw">Fetch</button>`
+            ? `<span class="muted">Not fetched</span> · <button type="button" class="btn-table-key-link" id="btnDetailFetchThisKw">Fetch from Bing</button>`
             : `<button type="button" class="btn-table-key-link" data-action="open-keys">+ Connect Bing API</button>`;
 
       el.innerHTML = `<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
@@ -2760,9 +2822,11 @@ function initStudio(): void {
             }
             renderDetail({ type: 'kw', ref: k });
             renderTable();
+            renderSummary();
+            renderReport();
           }
         } finally {
-          if (btn) btn.textContent = 'Fetch';
+          if (btn) btn.textContent = 'Fetch from Bing';
         }
       });
       return;
@@ -2783,7 +2847,7 @@ function initStudio(): void {
           .map(
             (k) =>
               `<div class="signal-row">
-                <div class="signal-row-top"><span>${esc(k.keyword)}</span><span class="mono muted">${k.relevance}</span></div>
+                <div class="signal-row-top"><span>${esc(k.keyword)}</span><span>${k.search_volume != null ? `<span class="tag-bing" title="Search volume from Bing">Bing: ${fmt(k.search_volume)}</span> ` : ''}<span class="mono muted">${k.relevance}</span></span></div>
                 <div class="signal-bar-track"><div class="signal-bar-fill" style="width:${Math.max(4, k.relevance)}%"></div></div>
               </div>`
           )
@@ -2895,13 +2959,15 @@ function initStudio(): void {
       });
 
       renderTable();
+      renderSummary();
+      renderReport();
       if (state.selected) {
         const selNode = state.kwById[state.selected];
         if (selNode) renderDetail({ type: 'kw', ref: selNode });
       }
 
       if (bingVolStatus) {
-        bingVolStatus.textContent = `✓ ${updatedCount} keyword volumes synced`;
+        bingVolStatus.textContent = `✓ ${updatedCount} keyword volumes synced from Bing`;
         setTimeout(() => {
           if (bingVolStatus) bingVolStatus.hidden = true;
         }, 5000);
@@ -2964,10 +3030,10 @@ function initStudio(): void {
       if (key === 'search_volume') {
         const bing = getBingConfig();
         if (v != null && typeof v === 'number') {
-          return `<td class="num font-mono"><b>${fmt(v)}</b><span class="tag-bing">Bing</span></td>`;
+          return `<td class="num font-mono"><b>${fmt(v)}</b><span class="tag-bing" title="Verified search volume from Bing API">Bing</span></td>`;
         }
         if (bing && bing.key) {
-          return `<td class="num muted">–</td>`;
+          return `<td class="num"><button type="button" class="btn-table-fetch-kw" data-action="fetch-one" data-kw="${esc(k.keyword)}" data-id="${esc(k.id)}" title="Fetch Bing volume for '${esc(k.keyword)}'"><span class="muted">–</span> <span class="tag-bing tag-bing-ghost">Bing</span></button></td>`;
         }
         return `<td class="num"><button type="button" class="btn-table-key-link" data-action="open-keys" title="Enter Bing API key to fetch real volume">+ Connect Bing</button></td>`;
       }
@@ -3308,11 +3374,11 @@ function initStudio(): void {
       <p class="small muted">Frequency ${main.frequency} · density ${main.density}% · appears in ${main.section_count} sections.</p>
 
       <h2>Top keywords</h2>
-      <table class="mini"><thead><tr><th>Keyword</th><th class="num">Relevance</th><th>Tier</th><th>Cluster</th><th class="num">Freq.</th><th>Key placements</th></tr></thead><tbody>
+      <table class="mini"><thead><tr><th>Keyword</th><th class="num">Relevance</th>${d.keywords.some((k) => k.search_volume != null) ? `<th class="num">Search Vol. <span class="tag-bing">Bing</span></th>` : ''}<th>Tier</th><th>Cluster</th><th class="num">Freq.</th><th>Key placements</th></tr></thead><tbody>
       ${d.keywords
         .slice(0, 15)
         .map(
-          (k) => `<tr><td>${esc(k.keyword)}</td><td class="num"><b>${k.relevance}</b></td><td><span class="tier ${esc(k.tier)}">${esc(k.tier)}</span></td><td>${esc(k.cluster)}</td><td class="num">${k.frequency}</td>
+          (k) => `<tr><td>${esc(k.keyword)}</td><td class="num"><b>${k.relevance}</b></td>${d.keywords.some((x) => x.search_volume != null) ? `<td class="num font-mono">${k.search_volume != null ? `<b>${fmt(k.search_volume)}</b> <span class="tag-bing">Bing</span>` : '–'}</td>` : ''}<td><span class="tier ${esc(k.tier)}">${esc(k.tier)}</span></td><td>${esc(k.cluster)}</td><td class="num">${k.frequency}</td>
         <td>${[k.in_title && 'Title', k.in_h1 && 'H1', k.in_url && 'URL', k.in_meta && 'Meta', k.h2_count && `H2×${k.h2_count}`, k.h3_count && `H3×${k.h3_count}`].filter(Boolean).join(', ') || 'Copy only'}</td></tr>`
         )
         .join('')}
@@ -3369,13 +3435,18 @@ function initStudio(): void {
       '',
       '## Top keywords',
       '',
-      '| Keyword | Relevance | Tier | Cluster | Freq |',
-      '|---|---:|---|---|---:|',
+      d.keywords.some((k) => k.search_volume != null)
+        ? '| Keyword | Relevance | Search Vol. (Bing) | Tier | Cluster | Freq |'
+        : '| Keyword | Relevance | Tier | Cluster | Freq |',
+      d.keywords.some((k) => k.search_volume != null)
+        ? '|---|---:|---:|---|---|---:|'
+        : '|---|---:|---|---|---:|',
       ...d.keywords
         .slice(0, 20)
-        .map(
-          (k) =>
-            `| ${k.keyword} | ${k.relevance} | ${k.tier} | ${k.cluster} | ${k.frequency} |`
+        .map((k) =>
+          d.keywords.some((x) => x.search_volume != null)
+            ? `| ${k.keyword} | ${k.relevance} | ${k.search_volume != null ? `${fmt(k.search_volume)} (Bing)` : '–'} | ${k.tier} | ${k.cluster} | ${k.frequency} |`
+            : `| ${k.keyword} | ${k.relevance} | ${k.tier} | ${k.cluster} | ${k.frequency} |`
         ),
       '',
       '## Topic clusters',
