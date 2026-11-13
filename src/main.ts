@@ -267,7 +267,7 @@ function initStudio(): void {
   function syncBingFormFromStorage(): void {
     const bing = getBingConfig();
     if (bingApiKeyInput) bingApiKeyInput.value = bing?.key || '';
-    if (bingServiceType) bingServiceType.value = bing?.serviceType || 'azure';
+    if (bingServiceType) bingServiceType.value = bing?.serviceType || 'webmaster';
     if (bingMarket) bingMarket.value = bing?.market || 'en-US';
     if (bingCustomEndpointInput) {
       bingCustomEndpointInput.value = bing?.customEndpoint || '';
@@ -276,7 +276,7 @@ function initStudio(): void {
       bingCustomEndpointGroup.hidden = bing?.serviceType !== 'custom';
     }
     if (bingAutoFetchCheck) {
-      bingAutoFetchCheck.checked = Boolean(bing?.autoFetch);
+      bingAutoFetchCheck.checked = bing?.autoFetch !== false;
     }
     updateBingCardStatus(bing?.key ? 'connected' : 'inactive');
     if (bingTestFeedback) {
@@ -364,10 +364,10 @@ function initStudio(): void {
 
     const cfg: Partial<BingApiConfig> = {
       key,
-      serviceType: (bingServiceType?.value as any) || 'azure',
+      serviceType: (bingServiceType?.value as any) || 'webmaster',
       market: bingMarket?.value || 'en-US',
       customEndpoint: bingCustomEndpointInput?.value.trim(),
-      autoFetch: bingAutoFetchCheck?.checked ?? false,
+      autoFetch: bingAutoFetchCheck?.checked ?? true,
     };
     saveBingConfig(cfg);
     updateBingCardStatus('connected', 'Saved & Connected');
@@ -377,7 +377,7 @@ function initStudio(): void {
       bingTestFeedback.hidden = false;
       bingTestFeedback.className = 'api-test-feedback is-success';
       bingTestFeedback.textContent =
-        '✓ Bing API key saved safely in your browser storage. You can now fetch real search volumes!';
+        '✓ Bing API key saved safely. Real search volumes will be automatically fetched and cited as Source: Microsoft Bing API.';
     }
   });
 
@@ -394,7 +394,7 @@ function initStudio(): void {
 
     const cfg: BingApiConfig = {
       key,
-      serviceType: (bingServiceType?.value as any) || 'azure',
+      serviceType: (bingServiceType?.value as any) || 'webmaster',
       market: bingMarket?.value || 'en-US',
       customEndpoint: bingCustomEndpointInput?.value.trim(),
     };
@@ -745,7 +745,7 @@ function initStudio(): void {
     renderReport();
 
     const bing = getBingConfig();
-    if (bing?.key && bing?.autoFetch) {
+    if (bing?.key && bing?.autoFetch !== false) {
       setTimeout(() => {
         triggerFetchBingVolume(true);
       }, 300);
@@ -2783,11 +2783,15 @@ function initStudio(): void {
       const secName = (id: number) =>
         esc(trunc(state.secById[id]?.heading || '', 40));
       const bing = getBingConfig();
+      const citeSource =
+        bing?.serviceType === 'azure'
+          ? 'Microsoft Bing Web Search API v7'
+          : 'Microsoft Bing Webmaster Tools API (GetKeywordStats)';
       const volText =
         k.search_volume != null
-          ? `<b>${fmt(k.search_volume)}</b> searches <span class="tag-bing" title="Verified source: Bing API">Bing</span>`
+          ? `<b>${fmt(k.search_volume)}</b> search impressions <span class="tag-bing" title="Source: ${citeSource}">Bing</span><div class="cite-meta">Source: ${citeSource}</div>`
           : bing?.key
-            ? `<span class="muted">Not fetched</span> · <button type="button" class="btn-table-key-link" id="btnDetailFetchThisKw">Fetch from Bing</button>`
+            ? `<span class="muted">Awaiting fetch</span> · <button type="button" class="btn-table-key-link" id="btnDetailFetchThisKw">Fetch from Bing</button>`
             : `<button type="button" class="btn-table-key-link" data-action="open-keys">+ Connect Bing API</button>`;
 
       el.innerHTML = `<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
@@ -2798,7 +2802,7 @@ function initStudio(): void {
           </div>
         </div>
         <dl><dt>Relevance</dt><dd><b>${k.relevance}</b> / 100</dd>
-        <dt>Search Vol.</dt><dd>${volText}</dd>
+        <dt>Bing Search Vol.</dt><dd>${volText}</dd>
         <dt>Frequency</dt><dd>${k.frequency} (${k.body_count} in body copy)</dd>
         <dt>Density</dt><dd>${k.density}%</dd><dt>Sections</dt><dd>${k.section_count}</dd>
         <dt>First seen</dt><dd>${k.first_position == null ? 'headings only' : k.first_position + '% into the copy'}</dd></dl>
@@ -2883,7 +2887,7 @@ function initStudio(): void {
   const COLS: Array<[string, string, string?]> = [
     ['rank', '#', 'num'],
     ['keyword', 'Keyword'],
-    ['search_volume', 'Search Vol. (Bing)', 'num'],
+    ['search_volume', 'Bing Search Vol.', 'num'],
     ['relevance', 'Relevance', 'num'],
     ['tier', 'Tier'],
     ['cluster', 'Cluster'],
@@ -2966,8 +2970,11 @@ function initStudio(): void {
         if (selNode) renderDetail({ type: 'kw', ref: selNode });
       }
 
+      const banner = $('#bingCitationBanner');
+      if (banner && updatedCount > 0) banner.hidden = false;
+
       if (bingVolStatus) {
-        bingVolStatus.textContent = `✓ ${updatedCount} keyword volumes synced from Bing`;
+        bingVolStatus.textContent = `✓ ${updatedCount} keyword search volumes cited from Microsoft Bing API`;
         setTimeout(() => {
           if (bingVolStatus) bingVolStatus.hidden = true;
         }, 5000);
@@ -3030,12 +3037,12 @@ function initStudio(): void {
       if (key === 'search_volume') {
         const bing = getBingConfig();
         if (v != null && typeof v === 'number') {
-          return `<td class="num font-mono"><b>${fmt(v)}</b><span class="tag-bing" title="Verified search volume from Bing API">Bing</span></td>`;
+          return `<td class="num font-mono" title="Source: Microsoft Bing API"><b>${fmt(v)}</b> <span class="tag-bing" title="Source: Microsoft Bing API">Bing</span></td>`;
         }
         if (bing && bing.key) {
-          return `<td class="num"><button type="button" class="btn-table-fetch-kw" data-action="fetch-one" data-kw="${esc(k.keyword)}" data-id="${esc(k.id)}" title="Fetch Bing volume for '${esc(k.keyword)}'"><span class="muted">–</span> <span class="tag-bing tag-bing-ghost">Bing</span></button></td>`;
+          return `<td class="num"><button type="button" class="btn-table-fetch-kw" data-action="fetch-one" data-kw="${esc(k.keyword)}" data-id="${esc(k.id)}" title="Fetch search volume from Microsoft Bing API"><span class="muted">–</span> <span class="tag-bing tag-bing-ghost">Bing</span></button></td>`;
         }
-        return `<td class="num"><button type="button" class="btn-table-key-link" data-action="open-keys" title="Enter Bing API key to fetch real volume">+ Connect Bing</button></td>`;
+        return `<td class="num"><button type="button" class="btn-table-key-link" data-action="open-keys" title="Enter Bing Webmaster API key to fetch real volume">+ Connect Bing</button></td>`;
       }
       if (key === 'relevance') {
         return `<td class="num"><b>${v}</b><span class="bar" style="width:${Number(v) * 0.5}px"></span></td>`;
@@ -3056,6 +3063,12 @@ function initStudio(): void {
         `<th class="${c[2] || ''}" data-k="${c[0]}">${c[1]}${state.sort.key === c[0] ? ` <span class="arr">${state.sort.dir < 0 ? '↓' : '↑'}</span>` : ''}</th>`
     ).join('')}</tr></thead>
       <tbody>${rows.map((k) => `<tr>${COLS.map((c) => cell(k, c)).join('')}</tr>`).join('')}</tbody>`;
+
+    const hasBingVol = state.data.keywords.some((k) => k.search_volume != null);
+    const citationBanner = $('#bingCitationBanner');
+    if (citationBanner) {
+      citationBanner.hidden = !hasBingVol;
+    }
 
     $$<HTMLTableCellElement>('#tbl th').forEach((th) => {
       th.addEventListener('click', () => {
@@ -3085,7 +3098,8 @@ function initStudio(): void {
     const head = [
       'rank',
       'keyword',
-      'search_volume_bing',
+      'bing_search_volume_impressions',
+      'bing_data_source_citation',
       'relevance',
       'tier',
       'cluster',
@@ -3112,6 +3126,7 @@ function initStudio(): void {
       k.rank,
       k.keyword,
       k.search_volume ?? '',
+      k.search_volume != null ? 'Source: Microsoft Bing API' : '',
       k.relevance,
       k.tier,
       k.cluster,
@@ -3406,6 +3421,12 @@ function initStudio(): void {
       <h2>Issues &amp; recommendations</h2>
       ${d.issues.map((i) => `<div class="issue"><span class="sev ${esc(i.severity)}">${esc(i.severity)}</span>${esc(i.message)}</div>`).join('') || '<p>No on-page issues detected.</p>'}
 
+      <h2>Data Sources &amp; Citations</h2>
+      <div class="issue" style="border-left-color:var(--accent);background:rgba(0,229,255,0.06);margin-bottom:16px">
+        <span class="sev" style="background:rgba(0,229,255,0.18);color:var(--accent);border-color:rgba(0,229,255,0.4)">CITATION</span>
+        Search volume data cited in this report is sourced from the <b>Microsoft Bing Webmaster Tools API</b> (<code>GetKeywordStats</code>). Metrics reflect real organic search query impressions across the Bing network.
+      </div>
+
       <h2>How relevance is estimated</h2>
       <p class="method">Every 1–4 word phrase on the page is a candidate. Its score adds placement weights (title 10, H1 8, URL 6, H2 5, meta description 5, H3 3, H4–H6 2, bold and alt text 1.5, anchor text 1) to body frequency with diminishing returns, plus bonuses for appearing early in the copy, being spread across many sections and being an exact match for the title/H1. Longer phrases get a specificity multiplier, and fragments that only appear inside a longer phrase are discounted. Scores are normalised so the strongest keyword is 100. Tiers: Primary ≥ 65, Secondary ≥ 45, Supporting ≥ 25, Long-tail below. Scores are on-page estimates only and don't include search volume or competition.</p>`;
   }
@@ -3436,7 +3457,7 @@ function initStudio(): void {
       '## Top keywords',
       '',
       d.keywords.some((k) => k.search_volume != null)
-        ? '| Keyword | Relevance | Search Vol. (Bing) | Tier | Cluster | Freq |'
+        ? '| Keyword | Relevance | Bing Search Vol. | Tier | Cluster | Freq |'
         : '| Keyword | Relevance | Tier | Cluster | Freq |',
       d.keywords.some((k) => k.search_volume != null)
         ? '|---|---:|---:|---|---|---:|'
@@ -3445,7 +3466,7 @@ function initStudio(): void {
         .slice(0, 20)
         .map((k) =>
           d.keywords.some((x) => x.search_volume != null)
-            ? `| ${k.keyword} | ${k.relevance} | ${k.search_volume != null ? `${fmt(k.search_volume)} (Bing)` : '–'} | ${k.tier} | ${k.cluster} | ${k.frequency} |`
+            ? `| ${k.keyword} | ${k.relevance} | ${k.search_volume != null ? `${fmt(k.search_volume)} (Source: Microsoft Bing API)` : '–'} | ${k.tier} | ${k.cluster} | ${k.frequency} |`
             : `| ${k.keyword} | ${k.relevance} | ${k.tier} | ${k.cluster} | ${k.frequency} |`
         ),
       '',
@@ -3479,6 +3500,13 @@ function initStudio(): void {
       '',
       ...d.issues.map((i) => `- **${i.severity}**: ${i.message}`)
     );
+    if (d.keywords.some((k) => k.search_volume != null)) {
+      L.push(
+        '',
+        '---',
+        '*Search volume data source: Microsoft Bing API (Webmaster Tools GetKeywordStats) - Organic search query impressions.*'
+      );
+    }
     return L.join('\n');
   }
 

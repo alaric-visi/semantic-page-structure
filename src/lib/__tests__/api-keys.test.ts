@@ -103,5 +103,65 @@ describe('Volume Request Proxy Handler', () => {
     const body = await res.json();
     expect(body.error).toContain('No API key provided');
   });
+
+  it('handles Bing Webmaster Tools API test calls with citation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        d: [{ Impressions: 12500, Clicks: 250 }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const req = new Request('http://localhost/api/keywords/volume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'test',
+        serviceType: 'webmaster',
+        apiKey: 'fake-bing-webmaster-key',
+      }),
+    });
+
+    const res = await handleVolumeRequest(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.serviceType).toBe('webmaster');
+    expect(body.citation).toContain('Bing Webmaster Tools API');
+    expect(body.sampleMatches).toBe(12500);
+  });
+
+  it('handles Bing Webmaster Tools batch volume calls', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      const isRunning = String(url).includes('running');
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          d: [{ Impressions: isRunning ? 45000 : 8200 }],
+        }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const req = new Request('http://localhost/api/keywords/volume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'batch',
+        serviceType: 'webmaster',
+        apiKey: 'fake-bing-webmaster-key',
+        keywords: ['running shoes', 'sneakers'],
+      }),
+    });
+
+    const res = await handleVolumeRequest(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.citation).toContain('Bing Webmaster Tools');
+    expect(body.results['running shoes']).toBe(45000);
+    expect(body.results['sneakers']).toBe(8200);
+  });
 });
 

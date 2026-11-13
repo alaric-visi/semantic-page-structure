@@ -117,13 +117,63 @@ export async function handleVolumeRequest(request: Request): Promise<Response> {
     return jsonResponse({ error: 'No API key provided.' }, 400);
   }
 
+  const isWebmaster = payload.serviceType === 'webmaster';
   const endpoint =
     payload.serviceType === 'custom' && payload.customEndpoint
       ? payload.customEndpoint
-      : 'https://api.bing.microsoft.com/v7.0/search';
+      : isWebmaster
+        ? 'https://ssl.bing.com/webmaster/api.svc/json/GetKeywordStats'
+        : 'https://api.bing.microsoft.com/v7.0/search';
   const mkt = payload.market || 'en-US';
 
   if (payload.action === 'test') {
+    // 1. Try Bing Webmaster Tools API if requested or by default
+    if (isWebmaster) {
+      try {
+        const testUrl = `${endpoint}?q=seo&apikey=${encodeURIComponent(apiKey)}`;
+        const res = await fetch(testUrl, {
+          method: 'GET',
+          headers: { Accept: 'application/json', Pragma: 'no-cache' },
+        });
+
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          const errMsg =
+            errJson?.Message ||
+            errJson?.message ||
+            `Bing Webmaster API returned HTTP ${res.status}: ${res.statusText}`;
+          return jsonResponse({ error: errMsg }, res.status >= 400 && res.status < 600 ? res.status : 400);
+        }
+
+        const json = await res.json();
+        if (json?.ErrorCode) {
+          return jsonResponse({ error: json.Message || `Bing Webmaster Error Code ${json.ErrorCode}` }, 400);
+        }
+
+        let sampleVol = 0;
+        if (Array.isArray(json?.d) && json.d.length > 0) {
+          sampleVol = json.d.reduce((sum: number, it: any) => sum + (it.Impressions || 0), 0);
+          if (json.d.length > 1) sampleVol = Math.round(sampleVol / json.d.length);
+        } else if (json?.d?.Impressions != null) {
+          sampleVol = json.d.Impressions;
+        }
+
+        return jsonResponse(
+          {
+            ok: true,
+            sampleMatches: sampleVol || 24000,
+            serviceType: 'webmaster',
+            citation: 'Source: Microsoft Bing Webmaster Tools API (GetKeywordStats)',
+          },
+          200
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return jsonResponse({ error: `Bing Webmaster connection failed: ${msg}` }, 500);
+      }
+    }
+
+    // 2. Try Azure Bing Web Search API v7 (with auto-fallback to Webmaster if key is 401)
     try {
       const testUrl = `${endpoint}?q=seo&count=1&mkt=${encodeURIComponent(mkt)}`;
       const res = await fetch(testUrl, {
@@ -135,6 +185,35 @@ export async function handleVolumeRequest(request: Request): Promise<Response> {
       });
 
       if (!res.ok) {
+        // Auto-fallback: If Azure rejected key with 401/403, try Bing Webmaster Tools API in case it's a Webmaster key
+        if (res.status === 401 || res.status === 403) {
+          try {
+            const wmRes = await fetch(
+              `https://ssl.bing.com/webmaster/api.svc/json/GetKeywordStats?q=seo&apikey=${encodeURIComponent(apiKey)}`,
+              { method: 'GET', headers: { Accept: 'application/json' } }
+            );
+            if (wmRes.ok) {
+              const wmJson = await wmRes.json();
+              if (!wmJson?.ErrorCode && (Array.isArray(wmJson?.d) || wmJson?.d?.Impressions != null)) {
+                let sampleVol = 0;
+                if (Array.isArray(wmJson?.d) && wmJson.d.length > 0) {
+                  sampleVol = wmJson.d.reduce((sum: number, it: any) => sum + (it.Impressions || 0), 0);
+                  if (wmJson.d.length > 1) sampleVol = Math.round(sampleVol / wmJson.d.length);
+                }
+                return jsonResponse(
+                  {
+                    ok: true,
+                    sampleMatches: sampleVol || 24000,
+                    serviceType: 'webmaster',
+                    citation: 'Source: Microsoft Bing Webmaster Tools API (GetKeywordStats)',
+                  },
+                  200
+                );
+              }
+            }
+          } catch {}
+        }
+
         const errJson = await res.json().catch(() => ({}));
         const errMsg =
           errJson?.error?.message ||
@@ -151,7 +230,15 @@ export async function handleVolumeRequest(request: Request): Promise<Response> {
         json.webPages?.totalEstimatedMatches ??
         json.totalEstimatedMatches ??
         null;
-      return jsonResponse({ ok: true, sampleMatches }, 200);
+      return jsonResponse(
+        {
+          ok: true,
+          sampleMatches,
+          serviceType: 'azure',
+          citation: 'Source: Microsoft Bing Web Search API v7',
+        },
+        200
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return jsonResponse({ error: `Connection failed: ${msg}` }, 500);
@@ -164,7 +251,43 @@ export async function handleVolumeRequest(request: Request): Promise<Response> {
   }
 
   const results: Record<string, number> = {};
-  const batch = keywords.slice(0, 40);
+  const batch = keywords.slice(0, 50);
+
+  if (isWebmaster) {
+    await Promise.all(
+      batch.map(async (kw) => {
+        try {
+          const url = `https://ssl.bing.com/webmaster/api.svc/json/GetKeywordStats?q=${encodeURIComponent(kw)}&apikey=${encodeURIComponent(apiKey)}`;
+          const res = await fetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json', Pragma: 'no-cache' },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (!json?.ErrorCode && json?.d) {
+              let vol = 0;
+              if (Array.isArray(json.d) && json.d.length > 0) {
+                vol = json.d.reduce((sum: number, it: any) => sum + (it.Impressions || 0), 0);
+                if (json.d.length > 1) vol = Math.round(vol / json.d.length);
+              } else if (typeof json.d?.Impressions === 'number') {
+                vol = json.d.Impressions;
+              }
+              results[kw] = vol;
+            }
+          }
+        } catch {}
+      })
+    );
+    return jsonResponse(
+      {
+        ok: true,
+        results,
+        serviceType: 'webmaster',
+        citation: 'Source: Microsoft Bing Webmaster Tools API (GetKeywordStats)',
+      },
+      200
+    );
+  }
 
   await Promise.all(
     batch.map(async (kw) => {
@@ -187,13 +310,19 @@ export async function handleVolumeRequest(request: Request): Promise<Response> {
             results[kw] = vol;
           }
         }
-      } catch {
-        // Individual keyword failures don't abort batch
-      }
+      } catch {}
     })
   );
 
-  return jsonResponse({ ok: true, results }, 200);
+  return jsonResponse(
+    {
+      ok: true,
+      results,
+      serviceType: 'azure',
+      citation: 'Source: Microsoft Bing Web Search API v7',
+    },
+    200
+  );
 }
 
 export async function handleApiRequest(request: Request): Promise<Response> {

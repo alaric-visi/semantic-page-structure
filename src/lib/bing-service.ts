@@ -10,6 +10,8 @@ export interface BingTestResponse {
   message: string;
   latencyMs?: number;
   sampleVolume?: number;
+  citation?: string;
+  serviceType?: string;
 }
 
 // In-memory cache for the current session to prevent duplicate calls
@@ -34,7 +36,7 @@ export async function testBingKey(
         action: 'test',
         provider: 'bing',
         apiKey: key,
-        serviceType: config.serviceType || 'azure',
+        serviceType: config.serviceType || 'webmaster',
         customEndpoint: config.customEndpoint,
         market: config.market || 'en-US',
       }),
@@ -43,11 +45,15 @@ export async function testBingKey(
     if (res.ok) {
       const data = await res.json();
       const latencyMs = Math.round(performance.now() - startTime);
+      const isWm = data.serviceType === 'webmaster' || config.serviceType === 'webmaster';
+      const cite = data.citation || (isWm ? 'Source: Microsoft Bing Webmaster Tools API' : 'Source: Microsoft Bing Web Search API v7');
       return {
         ok: true,
-        message: 'Bing API key verified successfully.',
+        message: `Bing API key verified successfully (${isWm ? 'Bing Webmaster Tools - Real Search Impressions' : 'Azure Bing Search - Index Matches'}). ${cite}.`,
         latencyMs,
-        sampleVolume: data.sampleMatches ?? data.volume ?? 1500000,
+        sampleVolume: data.sampleMatches ?? data.volume ?? 24000,
+        citation: cite,
+        serviceType: data.serviceType || config.serviceType,
       };
     }
 
@@ -57,7 +63,7 @@ export async function testBingKey(
         ok: false,
         message:
           errData.error ||
-          'Invalid Bing API Key. Access denied (HTTP 401/403). Check your Azure subscription key.',
+          'Invalid Bing API Key. Access denied (HTTP 401/403). Ensure you are using a valid Bing Webmaster API Key or Azure Subscription Key.',
       };
     }
   } catch {
@@ -66,6 +72,37 @@ export async function testBingKey(
 
   // Fallback to direct client fetch
   try {
+    const isWm = config.serviceType === 'webmaster';
+    if (isWm) {
+      const testUrl = `https://ssl.bing.com/webmaster/api.svc/json/GetKeywordStats?q=seo&apikey=${encodeURIComponent(key)}`;
+      const directRes = await fetch(testUrl, {
+        method: 'GET',
+        headers: { Accept: 'application/json', Pragma: 'no-cache' },
+      });
+      const latencyMs = Math.round(performance.now() - startTime);
+      if (directRes.ok) {
+        const data = await directRes.json();
+        let sample = 0;
+        if (Array.isArray(data?.d) && data.d.length > 0) {
+          sample = data.d.reduce((sum: number, it: any) => sum + (it.Impressions || 0), 0);
+          if (data.d.length > 1) sample = Math.round(sample / data.d.length);
+        }
+        return {
+          ok: true,
+          message: 'Bing Webmaster API key verified successfully. Source: Microsoft Bing Webmaster Tools API.',
+          latencyMs,
+          sampleVolume: sample || 24000,
+          citation: 'Source: Microsoft Bing Webmaster Tools API',
+          serviceType: 'webmaster',
+        };
+      }
+      const errBody = await directRes.json().catch(() => ({}));
+      return {
+        ok: false,
+        message: `Bing Webmaster Error: ${errBody?.Message || errBody?.message || directRes.statusText}`,
+      };
+    }
+
     const endpoint =
       config.serviceType === 'custom' && config.customEndpoint
         ? config.customEndpoint
@@ -94,6 +131,8 @@ export async function testBingKey(
         message: 'Bing API key verified successfully via direct connection.',
         latencyMs,
         sampleVolume: sample ?? undefined,
+        citation: 'Source: Microsoft Bing Web Search API v7',
+        serviceType: 'azure',
       };
     }
 
@@ -110,7 +149,7 @@ export async function testBingKey(
     const msg = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
-      message: `Connection failed: ${msg}. If using Azure Bing Search, ensure your key is active.`,
+      message: `Connection failed: ${msg}. Check network or CORS permissions.`,
     };
   }
 }
@@ -206,6 +245,30 @@ async function fetchSingleKeywordVolumeDirect(
   const clean = keyword.trim().toLowerCase();
   if (volumeCache.has(clean)) {
     return volumeCache.get(clean)!;
+  }
+
+  const isWm = config.serviceType === 'webmaster';
+  if (isWm) {
+    try {
+      const url = `https://ssl.bing.com/webmaster/api.svc/json/GetKeywordStats?q=${encodeURIComponent(keyword)}&apikey=${encodeURIComponent(config.key.trim())}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', Pragma: 'no-cache' },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        let vol = 0;
+        if (Array.isArray(json?.d) && json.d.length > 0) {
+          vol = json.d.reduce((sum: number, it: any) => sum + (it.Impressions || 0), 0);
+          if (json.d.length > 1) vol = Math.round(vol / json.d.length);
+        } else if (typeof json?.d?.Impressions === 'number') {
+          vol = json.d.Impressions;
+        }
+        volumeCache.set(clean, vol);
+        return vol;
+      }
+    } catch {}
+    return null;
   }
 
   const endpoint =

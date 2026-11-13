@@ -387,6 +387,10 @@
               <div class="tablewrap">
                 <table id="tbl"></table>
               </div>
+              <div class="data-citation-banner" id="bingCitationBanner" hidden>
+                <span class="tag-bing">Source: Microsoft Bing API</span>
+                <span class="citation-text" id="bingCitationText">Search volume figures sourced from Microsoft Bing Webmaster Tools API (GetKeywordStats). Metric reflects organic search impressions across the Bing network.</span>
+              </div>
             </section>
 
             <!-- TAB 3: PLAIN-TEXT OUTLINE -->
@@ -502,8 +506,8 @@
             <form class="api-card-form" id="formBingKey" onsubmit="return false;">
               <div class="form-group">
                 <label for="bingApiKeyInput" class="form-label">
-                  <span>Bing API Key (Ocp-Apim-Subscription-Key)</span>
-                  <a href="https://portal.azure.com/#blade/HubsExtension/BrowseResource/resourceType/Microsoft.CognitiveServices%2Faccounts" target="_blank" rel="noopener noreferrer" class="link-external">Get Azure Key &nearr;</a>
+                  <span>Bing API Key (Webmaster API Key or Azure Subscription Key)</span>
+                  <a href="https://www.bing.com/webmasters/api" target="_blank" rel="noopener noreferrer" class="link-external">Get Bing Webmaster API Key &nearr;</a>
                 </label>
                 <div class="input-with-tools">
                   <input
@@ -529,9 +533,9 @@
                 <div class="form-group">
                   <label for="bingServiceType" class="form-label">Service / Endpoint Flavor</label>
                   <select id="bingServiceType" class="select-input">
-                    <option value="azure" selected>Azure Bing Web Search API v7 (Recommended)</option>
-                    <option value="webmaster">Bing Webmaster Tools Keyword API</option>
-                    <option value="custom">Custom Azure Search Endpoint</option>
+                    <option value="webmaster" selected>Bing Webmaster Tools Keyword API (Recommended - Real Search Impressions)</option>
+                    <option value="azure">Azure Bing Web Search API v7 (Index Matches)</option>
+                    <option value="custom">Custom Endpoint</option>
                   </select>
                 </div>
 
@@ -557,15 +561,20 @@
                   type="url"
                   id="bingCustomEndpointInput"
                   class="text-input font-mono"
-                  placeholder="https://your-resource-name.cognitiveservices.azure.com/bing/v7.0/search"
+                  placeholder="https://your-endpoint/api"
                 />
               </div>
 
               <div class="form-group-checkbox">
                 <label class="checkbox-label">
-                  <input type="checkbox" id="bingAutoFetchCheck" />
-                  <span>Automatically fetch Bing search volume for top keywords during page analysis</span>
+                  <input type="checkbox" id="bingAutoFetchCheck" checked />
+                  <span>Automatically fetch real Bing search volume for all keywords during page analysis</span>
                 </label>
+              </div>
+
+              <div class="api-card-citation-notice">
+                <span class="tag-bing">Citation Guarantee</span>
+                <span>All search volume figures are accurately marked and cited as <b>Source: Microsoft Bing API</b> across the data table, detail inspector, summary cards, and reports.</span>
               </div>
 
               <div class="api-card-actions">

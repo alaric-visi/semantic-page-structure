@@ -51,9 +51,9 @@ export function saveBingConfig(cfg: Partial<BingApiConfig>): StoredApiKeys {
   const current = getStoredApiKeys();
   const existing = current.bing || {
     key: '',
-    serviceType: 'azure',
+    serviceType: 'webmaster',
     market: 'en-US',
-    autoFetch: false,
+    autoFetch: true,
   };
   const updated: BingApiConfig = {
     ...existing,
